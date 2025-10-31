@@ -293,11 +293,12 @@ if(BUILD_2D_SLAM)
     src/gtsam_points/d2/factors/integrated_vgicp_factor_2d.cpp
     # ANN
     src/gtsam_points/d2/ann/kdtree_2d.cpp
+    src/gtsam_points/d2/ann/fast_occupancy_grid_2d.cpp
     # Features
     src/gtsam_points/d2/features/normal_estimation_2d.cpp
     src/gtsam_points/d2/features/covariance_estimation_2d.cpp
     # Registration
-    # src/gtsam_points/d2/registration/ransac_2d.cpp
+    src/gtsam_points/d2/registration/alignment_2d.cpp
     # Util
     # src/gtsam_points/d2/util/bspline_2d.cpp
   )
