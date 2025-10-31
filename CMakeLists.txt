@@ -285,10 +285,12 @@ if(BUILD_2D_SLAM)
     src/gtsam_points/d2/types/point_cloud_2d.cpp
     src/gtsam_points/d2/types/point_cloud_2d_cpu.cpp
     src/gtsam_points/d2/types/laser_scan.cpp
+    src/gtsam_points/d2/types/gaussian_gridmap_2d.cpp
     # Factors
     src/gtsam_points/d2/factors/integrated_matching_cost_factor_2d.cpp
     src/gtsam_points/d2/factors/integrated_icp_factor_2d.cpp
     src/gtsam_points/d2/factors/integrated_gicp_factor_2d.cpp
+    src/gtsam_points/d2/factors/integrated_vgicp_factor_2d.cpp
     # ANN
     src/gtsam_points/d2/ann/kdtree_2d.cpp
     # Features
