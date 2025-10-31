@@ -22,6 +22,11 @@ option(BUILD_WITH_MARCH_NATIVE "Build with -march=native" OFF)
 option(ENABLE_CPPCHECK "Enable cppcheck" OFF)
 option(ENABLE_COVERAGE "Enable coverage check" OFF)
 
+# 2D SLAM options
+option(BUILD_2D_SLAM "Build 2D SLAM library" ON)
+option(BUILD_2D_TESTS "Build 2D SLAM tests" ON)
+option(BUILD_2D_DEMOS "Build 2D SLAM demos" ON)
+
 if(BUILD_WITH_MARCH_NATIVE)
   set(GTSAM_POINTS_WITH_MARCH_NATIVE 1)
   add_compile_options(-march=native)
@@ -269,6 +274,53 @@ if(BUILD_WITH_CUDA)
   )
 endif()
 
+###################
+## 2D SLAM Library ##
+###################
+if(BUILD_2D_SLAM)
+  message(STATUS "Building 2D SLAM library")
+
+  add_library(gtsam_points_2d SHARED
+    # Types
+    # src/gtsam_points/d2/types/point_cloud_2d.cpp
+    # src/gtsam_points/d2/types/laser_scan.cpp
+    # Factors
+    # src/gtsam_points/d2/factors/integrated_matching_cost_factor_2d.cpp
+    # src/gtsam_points/d2/factors/integrated_icp_factor_2d.cpp
+    # src/gtsam_points/d2/factors/integrated_point_to_line_factor.cpp
+    # ANN
+    # src/gtsam_points/d2/ann/kdtree_2d.cpp
+    # Features
+    # src/gtsam_points/d2/features/normal_estimation_2d.cpp
+    # Registration
+    # src/gtsam_points/d2/registration/ransac_2d.cpp
+    # Util
+    # src/gtsam_points/d2/util/bspline_2d.cpp
+  )
+
+  target_include_directories(gtsam_points_2d PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  target_link_libraries(gtsam_points_2d
+    Boost::boost
+    Boost::graph
+    Boost::filesystem
+    Eigen3::Eigen
+    gtsam
+    gtsam_unstable
+    $<TARGET_NAME_IF_EXISTS:TBB::tbb>
+    $<TARGET_NAME_IF_EXISTS:OpenMP::OpenMP_CXX>
+  )
+
+  # Optionally link with 3D optimizers (reusable)
+  # target_link_libraries(gtsam_points_2d gtsam_points)
+
+  list(APPEND GTSAM_POINTS_LIBRARIES gtsam_points_2d)
+endif()
+
 #Demo
 if(BUILD_DEMO)
   find_package(iridescence REQUIRED)
@@ -346,6 +398,49 @@ if(BUILD_TESTS)
       gtest_discover_tests(${test_name} WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endforeach()
   endif()
+endif()
+
+# 2D SLAM Demo
+if(BUILD_2D_DEMOS AND BUILD_2D_SLAM)
+  find_package(Iridescence QUIET)
+
+  if(Iridescence_FOUND)
+    file(GLOB demo_2d_sources "src/demo/d2/*.cpp")
+    foreach(demo_src IN LISTS demo_2d_sources)
+      get_filename_component(demo_name ${demo_src} NAME_WE)
+
+      add_executable(${demo_name} ${demo_src})
+      target_link_libraries(${demo_name} gtsam_points_2d Iridescence::Iridescence)
+    endforeach()
+  else()
+    message(STATUS "Iridescence not found - 2D demos will not be built")
+  endif()
+endif()
+
+# 2D SLAM Tests
+if(BUILD_2D_TESTS AND BUILD_2D_SLAM)
+  if(NOT TARGET gtest_main)
+    include(FetchContent)
+    FetchContent_Declare(
+      googletest
+      URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+  endif()
+
+  enable_testing()
+  include(GoogleTest)
+
+  file(GLOB test_2d_sources "tests/d2/*.cpp")
+  foreach(test_src IN LISTS test_2d_sources)
+    get_filename_component(test_name ${test_src} NAME_WE)
+
+    add_executable(${test_name} ${test_src})
+    target_link_libraries(${test_name} gtsam_points_2d gtest_main)
+    target_include_directories(${test_name} PRIVATE ${Boost_INCLUDE_DIRS})
+    gtest_discover_tests(${test_name} WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  endforeach()
 endif()
 
 
