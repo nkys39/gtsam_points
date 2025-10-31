@@ -291,6 +291,8 @@ if(BUILD_2D_SLAM)
     src/gtsam_points/d2/factors/integrated_icp_factor_2d.cpp
     src/gtsam_points/d2/factors/integrated_gicp_factor_2d.cpp
     src/gtsam_points/d2/factors/integrated_vgicp_factor_2d.cpp
+    src/gtsam_points/d2/factors/integrated_ct_icp_factor_2d.cpp
+    src/gtsam_points/d2/factors/integrated_ct_gicp_factor_2d.cpp
     # ANN
     src/gtsam_points/d2/ann/kdtree_2d.cpp
     src/gtsam_points/d2/ann/fast_occupancy_grid_2d.cpp
@@ -304,7 +306,7 @@ if(BUILD_2D_SLAM)
     src/gtsam_points/d2/segmentation/region_growing_2d.cpp
     src/gtsam_points/d2/segmentation/min_cut_2d.cpp
     # Util
-    # src/gtsam_points/d2/util/bspline_2d.cpp
+    src/gtsam_points/d2/util/bspline_2d.cpp
   )
 
   target_include_directories(gtsam_points_2d PUBLIC
