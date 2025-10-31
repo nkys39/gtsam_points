@@ -291,7 +291,8 @@ if(BUILD_2D_SLAM)
     # ANN
     src/gtsam_points/d2/ann/kdtree_2d.cpp
     # Features
-    # src/gtsam_points/d2/features/normal_estimation_2d.cpp
+    src/gtsam_points/d2/features/normal_estimation_2d.cpp
+    src/gtsam_points/d2/features/covariance_estimation_2d.cpp
     # Registration
     # src/gtsam_points/d2/registration/ransac_2d.cpp
     # Util
