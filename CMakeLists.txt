@@ -282,7 +282,8 @@ if(BUILD_2D_SLAM)
 
   add_library(gtsam_points_2d SHARED
     # Types
-    # src/gtsam_points/d2/types/point_cloud_2d.cpp
+    src/gtsam_points/d2/types/point_cloud_2d.cpp
+    src/gtsam_points/d2/types/point_cloud_2d_cpu.cpp
     # src/gtsam_points/d2/types/laser_scan.cpp
     # Factors
     # src/gtsam_points/d2/factors/integrated_matching_cost_factor_2d.cpp
