@@ -299,6 +299,7 @@ if(BUILD_2D_SLAM)
     src/gtsam_points/d2/features/covariance_estimation_2d.cpp
     # Registration
     src/gtsam_points/d2/registration/alignment_2d.cpp
+    src/gtsam_points/d2/registration/graduated_non_convexity_2d.cpp
     # Segmentation
     src/gtsam_points/d2/segmentation/region_growing_2d.cpp
     src/gtsam_points/d2/segmentation/min_cut_2d.cpp
