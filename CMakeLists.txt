@@ -290,7 +290,7 @@ if(BUILD_2D_SLAM)
     # src/gtsam_points/d2/factors/integrated_icp_factor_2d.cpp
     # src/gtsam_points/d2/factors/integrated_point_to_line_factor.cpp
     # ANN
-    # src/gtsam_points/d2/ann/kdtree_2d.cpp
+    src/gtsam_points/d2/ann/kdtree_2d.cpp
     # Features
     # src/gtsam_points/d2/features/normal_estimation_2d.cpp
     # Registration
