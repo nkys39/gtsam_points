@@ -1,0 +1,8 @@
+# Request
+string directory_path    # Directory to save the map files
+string map_name          # Name of the map (used as prefix for files)
+---
+# Response
+bool success
+string message
+uint32 num_keyframes     # Number of keyframes saved

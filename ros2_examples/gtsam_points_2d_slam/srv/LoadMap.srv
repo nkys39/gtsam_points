@@ -1,0 +1,8 @@
+# Request
+string directory_path    # Directory containing the map files
+string map_name          # Name of the map to load
+---
+# Response
+bool success
+string message
+uint32 num_keyframes     # Number of keyframes loaded

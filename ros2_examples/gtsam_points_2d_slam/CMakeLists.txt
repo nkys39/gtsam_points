@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -18,6 +19,12 @@ find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+
+# Generate service interfaces
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/SaveMap.srv"
+  "srv/LoadMap.srv"
+)
 
 # Find gtsam_points
 find_package(gtsam_points REQUIRED)
@@ -207,6 +214,36 @@ target_link_libraries(slam_with_ct_icp_node
   gtsam
 )
 
+# Add SLAM with Map Save node executable
+add_executable(slam_with_map_save_node
+  src/slam_with_map_save_node.cpp
+)
+
+target_include_directories(slam_with_map_save_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_with_map_save_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_map_save_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
+# Link service interfaces to the node
+rosidl_target_interfaces(slam_with_map_save_node
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
 # Install targets
 install(TARGETS
   slam_node
@@ -216,6 +253,7 @@ install(TARGETS
   slam_with_imu_node
   slam_with_fixed_lag_node
   slam_with_ct_icp_node
+  slam_with_map_save_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

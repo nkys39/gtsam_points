@@ -8,7 +8,7 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 
 ### チュートリアル全体像
 
-#### ✅ 実装済み（7つ）
+#### ✅ 実装済み（8つ）
 
 | # | 実装 | ノード名 | 特徴 | 用途 |
 |---|------|----------|------|------|
@@ -19,15 +19,16 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 | **5** | IMU統合SLAM | `slam_with_imu_node` | IMU事前積分でLiDARを補完 | 高速移動、動的環境 |
 | **6** | Fixed-lag Smoothing SLAM | `slam_with_fixed_lag_node` | スライディングウィンドウ最適化 | 長時間運用、メモリ効率重視 |
 | **7** | CT-ICP SLAM | `slam_with_ct_icp_node` | 連続時間ICP、モーション補償 | 高速移動、歪み補正 |
+| **8** | Map Save/Load SLAM | `slam_with_map_save_node` | マップ保存・読み込み (ROS service) | データ永続化、オフライン最適化 |
 
 #### 🚧 未実装（計画中）
 
 | # | カテゴリ | 実装予定 | 説明 |
 |---|---------|---------|------|
-| **8** | 連続時間SLAM | `slam_with_ct_gicp_node` | CT-GICP: モーション補償付きGICP、より高精度 |
-| **9** | グローバルレジストレーション | `slam_with_ransac_node` | RANSAC: ロバスト初期推定、リローカライゼーション |
-| **10** | グローバルレジストレーション | `slam_with_gnc_node` | GNC: Graduated Non-Convexity、外れ値ロバスト |
-| **11** | セグメンテーション | `slam_with_segmentation_node` | Region Growing/Min-Cut: 動的物体除去、意味マップ |
+| **9** | 連続時間SLAM | `slam_with_ct_gicp_node` | CT-GICP: モーション補償付きGICP、より高精度 |
+| **10** | グローバルレジストレーション | `slam_with_ransac_node` | RANSAC: ロバスト初期推定、リローカライゼーション |
+| **11** | グローバルレジストレーション | `slam_with_gnc_node` | GNC: Graduated Non-Convexity、外れ値ロバスト |
+| **12** | セグメンテーション | `slam_with_segmentation_node` | Region Growing/Min-Cut: 動的物体除去、意味マップ |
 
 ### 機能の組み合わせ可能性
 
@@ -570,6 +571,191 @@ for (size_t i = 0; i < msg->ranges.size(); ++i) {
 
 ---
 
+## 8. Map Save/Load SLAM（slam_with_map_save_node）
+
+### 特徴
+- ✅ **マップ保存**: ROSサービスでマップをファイルに保存
+- ✅ **ポイントクラウド保存**: キーフレームをPCD形式で保存
+- ✅ **ポーズグラフ保存**: 最適化されたポーズをJSON形式で保存
+- ✅ **データ永続化**: 長時間運用の結果を保存
+- 🚧 **マップ読み込み**: 保存されたマップの読み込み（実装予定）
+- 🚧 **オフライン最適化**: 保存データの後処理（実装予定）
+
+### アーキテクチャ
+```
+SLAM (基本SLAMと同じ) → ROS Service → ファイルシステム
+         ↓                    ↓               ↓
+    キーフレーム           save_map        PCD + JSON
+    最適化ポーズ          load_map
+```
+
+### マップ保存の仕組み
+
+**SaveMapサービス**を呼び出すと、以下のファイルが生成されます：
+
+```
+<directory_path>/<map_name>/
+├── map_info.json                 # マップメタデータ
+├── poses.json                    # 全キーフレームのポーズ
+└── keyframes/
+    ├── keyframe_000000.pcd       # キーフレーム点群
+    ├── keyframe_000001.pcd
+    └── ...
+```
+
+### ファイル形式
+
+#### map_info.json
+```json
+{
+  "map_name": "my_map",
+  "num_keyframes": 150,
+  "created_at": "Mon Jan 1 12:00:00 2025",
+  "use_vgicp": true
+}
+```
+
+#### poses.json
+```json
+{
+  "poses": [
+    {
+      "key": 0,
+      "x": 0.0,
+      "y": 0.0,
+      "theta": 0.0
+    },
+    {
+      "key": 1,
+      "x": 0.5,
+      "y": 0.1,
+      "theta": 0.05
+    },
+    ...
+  ]
+}
+```
+
+#### keyframe_*.pcd
+標準PCD形式（ASCII）:
+```
+# .PCD v0.7 - Point Cloud Data file format
+VERSION 0.7
+FIELDS x y
+SIZE 4 4
+TYPE F F
+...
+DATA ascii
+0.123 0.456
+0.789 1.011
+...
+```
+
+### 使用方法
+
+#### マップの保存
+```bash
+# 1. SLAMノード起動
+export TURTLEBOT3_MODEL=waffle_pi
+ros2 launch gtsam_points_2d_slam slam_with_map_save.launch.py
+
+# 2. ロボットを移動してマップ作成
+ros2 run turtlebot3_teleop teleop_keyboard
+
+# 3. マップ保存（別ターミナル）
+ros2 service call /slam_with_map_save_node/save_map \
+  gtsam_points_2d_slam/srv/SaveMap \
+  "{directory_path: '/tmp/my_maps', map_name: 'turtlebot3_world'}"
+```
+
+#### 保存結果の確認
+```bash
+ls -R /tmp/my_maps/turtlebot3_world/
+# 出力例:
+# /tmp/my_maps/turtlebot3_world/:
+# map_info.json  poses.json  keyframes/
+#
+# /tmp/my_maps/turtlebot3_world/keyframes/:
+# keyframe_000000.pcd  keyframe_000001.pcd  ...
+```
+
+### サービスインターフェース
+
+#### SaveMap.srv
+```
+# Request
+string directory_path    # 保存先ディレクトリ
+string map_name          # マップ名
+
+---
+# Response
+bool success             # 成功/失敗
+string message           # メッセージ
+uint32 num_keyframes     # 保存されたキーフレーム数
+```
+
+#### LoadMap.srv（実装予定）
+```
+# Request
+string directory_path    # 読み込み元ディレクトリ
+string map_name          # マップ名
+
+---
+# Response
+bool success             # 成功/失敗
+string message           # メッセージ
+uint32 num_keyframes     # 読み込まれたキーフレーム数
+```
+
+### 応用例
+
+#### 1. データ収集と後処理
+```bash
+# オンラインSLAMでデータ収集
+ros2 launch gtsam_points_2d_slam slam_with_map_save.launch.py
+
+# マップ保存
+ros2 service call ... save_map ...
+
+# オフラインで再最適化（実装予定）
+ros2 run gtsam_points_2d_slam offline_optimizer \
+  --map /tmp/my_maps/turtlebot3_world
+```
+
+#### 2. マップの可視化
+```bash
+# PCDファイルをCloudCompareで表示
+cloudcompare.CloudCompare /tmp/my_maps/turtlebot3_world/keyframes/*.pcd
+
+# ポーズグラフをPythonで可視化
+python3 visualize_poses.py /tmp/my_maps/turtlebot3_world/poses.json
+```
+
+#### 3. マップのマージ（将来実装）
+```bash
+# 複数セッションのマップを統合
+ros2 run gtsam_points_2d_slam map_merger \
+  --maps /tmp/my_maps/session1 /tmp/my_maps/session2 \
+  --output /tmp/my_maps/merged
+```
+
+### トピック
+- Subscribe: `/scan` (sensor_msgs/LaserScan)
+- Publish: `slam_odom`, `slam_path`
+- Services:
+  - `~/save_map` (gtsam_points_2d_slam/srv/SaveMap)
+  - `~/load_map` (gtsam_points_2d_slam/srv/LoadMap)
+
+### 今後の実装予定
+
+- [ ] マップ読み込み機能の実装
+- [ ] オフライン最適化ツール
+- [ ] 手動ループクロージャー追加
+- [ ] キーフレームマージ/削除機能
+- [ ] GTSAMグラフのシリアライゼーション
+
+---
+
 ## 必要な依存関係
 
 ### システム依存
@@ -719,14 +905,14 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 - [x] 5. IMU統合SLAM (`slam_with_imu_node`)
 - [x] 6. Fixed-lag Smoothing SLAM (`slam_with_fixed_lag_node`)
 
-### 🚧 Phase 2: 連続時間SLAM（進行中）
+### 🚧 Phase 2: 連続時間SLAM（一部完了）
 
 - [x] 7. CT-ICP SLAM (`slam_with_ct_icp_node`) ✅
   - モーション補償付きICP
   - タイムスタンプ付きスキャンデータ対応
   - 高速移動時の歪み補正
 
-- [ ] 8. CT-GICP SLAM (`slam_with_ct_gicp_node`)
+- [ ] 9. CT-GICP SLAM (`slam_with_ct_gicp_node`)
   - モーション補償付きGICP
   - より高精度な連続時間マッチング
 
@@ -758,17 +944,14 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 - [ ] ベンチマークデータセットでの評価
 - [ ] 実機（実TurtleBot3）での動作確認
 
-### 💾 Phase 6: オフライン最適化（計画中）
+### 💾 Phase 6: オフライン最適化（一部完了）
 
-- [ ] マップとグラフの保存機能
-  - ポイントクラウドマップの保存
-  - ファクターグラフの永続化
-  - ポーズグラフのエクスポート
-
-- [ ] マップとグラフの読み込み機能
-  - 保存済みマップの読み込み
-  - グラフの復元
-  - リローカライゼーション
+- [x] 8. Map Save/Load SLAM (`slam_with_map_save_node`) ✅
+  - ✅ ROSサービスでマップ保存
+  - ✅ ポイントクラウドマップの保存（PCD形式）
+  - ✅ ポーズグラフのエクスポート（JSON形式）
+  - 🚧 保存済みマップの読み込み（実装予定）
+  - 🚧 グラフの復元とリローカライゼーション（実装予定）
 
 - [ ] オフライン最適化ツール
   - 保存済みグラフの再最適化
