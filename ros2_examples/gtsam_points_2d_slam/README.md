@@ -4,9 +4,9 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 
 ## 概要
 
-このパッケージは、gtsam_pointsの2D SLAM機能を使用して、TurtleBot3シミュレーション環境で動作する**4種類の異なる2D SLAM実装例**を提供します。
+このパッケージは、gtsam_pointsの2D SLAM機能を使用して、TurtleBot3シミュレーション環境で動作する**5種類の異なる2D SLAM実装例**を提供します。
 
-### 4つの実装例
+### 5つの実装例
 
 | 実装 | ノード名 | 特徴 | 用途 |
 |------|----------|------|------|
@@ -14,6 +14,7 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 | **2. 基本SLAM** | `slam_node` | ISAM2によるグラフSLAM、ループクロージャーなし | 小規模環境での高精度マッピング |
 | **3. ループクロージャー付きSLAM** | `slam_with_loop_closure_node` | ループクロージャー検出と因子追加 | 大規模環境、長時間運用 |
 | **4. Wheel Odometry統合SLAM** | `slam_with_wheel_odom_node` | ホイールオドメトリとLiDARの融合 | 高精度かつロバストな位置推定 |
+| **5. IMU統合SLAM** | `slam_with_imu_node` | IMU事前積分でLiDARを補完 | 高速移動、動的環境 |
 
 ---
 
@@ -175,6 +176,85 @@ ros2 run turtlebot3_teleop teleop_keyboard
 
 ---
 
+## 5. IMU統合SLAM（slam_with_imu_node）
+
+### 特徴
+- ✅ **IMU事前積分**: ReintegratedIMUFactor2Dによる高精度な慣性統合
+- ✅ **速度推定**: IMUから速度とバイアスを同時推定
+- ✅ **高速移動対応**: LiDARのスキャン間を補間
+- ✅ **動的環境**: 一時的なLiDAR遮蔽にも対応
+- ⚠️ **キャリブレーション**: IMUノイズパラメータの調整が必要
+
+### アーキテクチャ
+```
+LaserScan + IMU → Factor Graph with IMU Preintegration → ISAM2
+    ↓        ↓              ↓                    ↓
+ GICP/VGICP  IMU    ReintegratedIMUFactor2D  Pose + Velocity + Bias
+                    (加速度・角速度の積分)
+```
+
+### ファクターグラフ構造
+```
+State: x (Pose2), v (Velocity), b (Bias)
+
+x0, v0, b0 --[IMU Preintegration]-- x1, v1, b1 --[IMU]-- x2, v2, b2
+    |                                    |                  |
+ [GICP]                               [GICP]            [GICP]
+```
+
+### IMU事前積分の仕組み
+
+**ReintegratedIMUFactor2D** は以下を実現：
+
+1. **連続的なIMU測定の積分**
+   - 加速度: `a_t` → 速度と位置の変化
+   - 角速度: `ω_z` → 姿勢の変化
+
+2. **バイアス推定**
+   - 加速度バイアス: `b_a = [b_ax, b_ay]`
+   - ジャイロバイアス: `b_g = b_gz`
+
+3. **ノイズモデル**
+   - 測定ノイズ（白色ノイズ）
+   - バイアスランダムウォーク
+
+4. **制約の追加**
+   ```
+   Pose_j = Pose_i ⊕ IMU_preintegrated
+   Vel_j = Vel_i + IMU_integrated_acceleration
+   Bias_j = Bias_i + random_walk
+   ```
+
+### 使用方法
+```bash
+export TURTLEBOT3_MODEL=waffle_pi
+ros2 launch gtsam_points_2d_slam slam_with_imu.launch.py
+
+# キーボードで操作（高速移動でもIMUが補完）
+ros2 run turtlebot3_teleop teleop_keyboard
+```
+
+### パラメータ（`config/slam_with_imu_params.yaml`）
+- `use_imu`: IMU統合の有効化
+- `imu_acc_noise`: 加速度計ノイズ [m/s²]
+- `imu_gyro_noise`: ジャイロスコープノイズ [rad/s]
+- `imu_acc_bias_noise`: 加速度バイアスランダムウォーク [m/s³]
+- `imu_gyro_bias_noise`: ジャイロバイアスランダムウォーク [rad/s²]
+- `gravity`: 重力加速度 [m/s²]
+
+### IMU統合の利点
+
+1. **スキャン間の補間**: LiDARの10Hz更新をIMUの100Hz更新で補完
+2. **急加速・急旋回対応**: スキャンマッチングが失敗しても継続
+3. **速度情報**: ナビゲーションや制御に有用
+4. **バイアス推定**: IMUドリフトを自動補正
+
+### トピック
+- Subscribe: `/scan` (sensor_msgs/LaserScan), `/imu` (sensor_msgs/Imu)
+- Publish: `slam_odom` (速度情報付き), `slam_path`
+
+---
+
 ## 必要な依存関係
 
 ### システム依存
@@ -225,14 +305,16 @@ source install/setup.bash
 
 ## 実装の比較
 
-| 機能 | LiDAR Odom | 基本SLAM | ループクロージャー | Wheel統合 |
-|------|------------|----------|-------------------|-----------|
-| グラフ最適化 | ❌ | ✅ | ✅ | ✅ |
-| ループクロージャー | ❌ | ❌ | ✅ | ❌ |
-| Wheel Odom統合 | ❌ | ❌ | ❌ | ✅ |
-| 計算コスト | 低 | 中 | 高 | 中 |
-| 累積誤差 | 大 | 中 | 小 | 小 |
-| 適用環境 | 小規模 | 中規模 | 大規模 | 全般 |
+| 機能 | LiDAR Odom | 基本SLAM | ループクロージャー | Wheel統合 | IMU統合 |
+|------|------------|----------|-------------------|-----------|---------|
+| グラフ最適化 | ❌ | ✅ | ✅ | ✅ | ✅ |
+| ループクロージャー | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Wheel Odom統合 | ❌ | ❌ | ❌ | ✅ | ❌ |
+| IMU統合 | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 速度推定 | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 計算コスト | 低 | 中 | 高 | 中 | 中 |
+| 累積誤差 | 大 | 中 | 小 | 小 | 小 |
+| 適用環境 | 小規模 | 中規模 | 大規模 | 全般 | 高速移動 |
 
 ## パラメータ調整ガイド
 
@@ -252,6 +334,16 @@ source install/setup.bash
 - `wheel_odom_weight` / `lidar_odom_weight`: 比率が重要
   - 滑りやすい床: LiDAR重みを上げる
   - LiDAR遮蔽が多い: Wheel重みを上げる
+
+### IMU統合固有
+
+- **ノイズパラメータ**: センサーデータシートを参照
+  - `imu_acc_noise`: TurtleBot3のIMUスペックに合わせて調整
+  - `imu_gyro_noise`: 静止時のIMUデータから推定
+- **バイアスノイズ**: 温度ドリフトの大きさに応じて調整
+  - 室内環境: デフォルト値で十分
+  - 屋外・高温変化: 大きめに設定
+- **重力**: 高度に応じて微調整（海抜0m: 9.81 m/s²）
 
 ## トラブルシューティング
 
@@ -285,6 +377,7 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 | 基本SLAM | ~50ms | 中 | 中 |
 | ループクロージャー | ~100ms* | 小 | 高 |
 | Wheel統合 | ~50ms | 小 | 中 |
+| IMU統合 | ~60ms | 小 | 中 |
 
 *ループクロージャー検出時はさらに増加
 

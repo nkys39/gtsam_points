@@ -129,12 +129,39 @@ target_link_libraries(slam_with_wheel_odom_node
   gtsam
 )
 
+# Add SLAM with IMU node executable
+add_executable(slam_with_imu_node
+  src/slam_with_imu_node.cpp
+)
+
+target_include_directories(slam_with_imu_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_with_imu_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_imu_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
 install(TARGETS
   slam_node
   lidar_odometry_node
   slam_with_loop_closure_node
   slam_with_wheel_odom_node
+  slam_with_imu_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
