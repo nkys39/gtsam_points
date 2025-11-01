@@ -1,0 +1,26 @@
+/**:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # Topics
+    scan_topic: "scan"
+
+    # SLAM parameters
+    use_vgicp: true            # Use VGICP (true) or GICP (false)
+
+    # Keyframe selection
+    keyframe_distance: 0.5     # meters
+    keyframe_angle: 0.3        # radians (~17 degrees)
+
+    # Voxel/Grid parameters
+    voxel_resolution: 0.1      # meters
+
+    # Scan matching parameters
+    max_correspondence_distance: 1.0  # meters
+
+    # Fixed-lag smoother parameters
+    smoother_lag: 30.0         # Time window in seconds (states older than this are marginalized)
+    max_keyframes: 100         # Maximum number of keyframes to keep in memory
