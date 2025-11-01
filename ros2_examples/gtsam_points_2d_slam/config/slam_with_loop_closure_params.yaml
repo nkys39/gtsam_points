@@ -1,0 +1,29 @@
+/**:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # Topics
+    scan_topic: "scan"
+
+    # SLAM parameters
+    use_vgicp: true            # Use VGICP (true) or GICP (false)
+
+    # Keyframe selection
+    keyframe_distance: 0.5     # meters
+    keyframe_angle: 0.3        # radians (~17 degrees)
+
+    # Voxel/Grid parameters
+    voxel_resolution: 0.1      # meters
+
+    # Scan matching parameters
+    max_correspondence_distance: 1.0  # meters
+
+    # Loop closure parameters
+    enable_loop_closure: true          # Enable loop closure detection
+    loop_search_distance: 10.0         # Start searching after this distance (meters)
+    loop_search_radius: 3.0            # Search radius for loop candidates (meters)
+    loop_min_fitness_score: 0.3        # Minimum fitness score to accept loop closure
+    loop_min_chain_length: 10          # Minimum keyframes before loop closure

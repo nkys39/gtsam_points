@@ -1,0 +1,21 @@
+/**:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # Topics
+    scan_topic: "scan"
+
+    # Method selection
+    use_vgicp: true            # Use VGICP (true) or GICP (false)
+    use_scan_to_map: true      # Use scan-to-map (true) or scan-to-scan (false)
+
+    # Voxel/Grid parameters
+    voxel_resolution: 0.1      # meters
+
+    # Scan matching parameters
+    max_correspondence_distance: 1.0           # meters
+    registration_max_iterations: 50            # iterations
+    registration_transformation_epsilon: 1e-4  # convergence threshold

@@ -1,0 +1,28 @@
+/**:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # Topics
+    scan_topic: "scan"
+    odom_topic: "odom"
+
+    # SLAM parameters
+    use_vgicp: true            # Use VGICP (true) or GICP (false)
+
+    # Keyframe selection
+    keyframe_distance: 0.5     # meters
+    keyframe_angle: 0.3        # radians (~17 degrees)
+
+    # Voxel/Grid parameters
+    voxel_resolution: 0.1      # meters
+
+    # Scan matching parameters
+    max_correspondence_distance: 1.0  # meters
+
+    # Odometry fusion parameters
+    use_wheel_odom: true       # Enable wheel odometry integration
+    wheel_odom_weight: 1.0     # Weight for wheel odometry (lower = more uncertainty)
+    lidar_odom_weight: 10.0    # Weight for LiDAR odometry (higher = more trusted)

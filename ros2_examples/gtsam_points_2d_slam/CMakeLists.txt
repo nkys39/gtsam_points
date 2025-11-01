@@ -14,6 +14,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -49,8 +50,91 @@ target_link_libraries(slam_node
   gtsam
 )
 
+# Add LiDAR Odometry node executable
+add_executable(lidar_odometry_node
+  src/lidar_odometry_node.cpp
+)
+
+target_include_directories(lidar_odometry_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(lidar_odometry_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(lidar_odometry_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
+# Add SLAM with Loop Closure node executable
+add_executable(slam_with_loop_closure_node
+  src/slam_with_loop_closure_node.cpp
+)
+
+target_include_directories(slam_with_loop_closure_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_with_loop_closure_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_loop_closure_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
+# Add SLAM with Wheel Odometry node executable
+add_executable(slam_with_wheel_odom_node
+  src/slam_with_wheel_odom_node.cpp
+)
+
+target_include_directories(slam_with_wheel_odom_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_with_wheel_odom_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_wheel_odom_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
-install(TARGETS slam_node
+install(TARGETS
+  slam_node
+  lidar_odometry_node
+  slam_with_loop_closure_node
+  slam_with_wheel_odom_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
