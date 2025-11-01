@@ -812,6 +812,224 @@ gtsam::Pose3 pose_3d = smoother.calculateEstimate<gtsam::Pose3>(pose_key_3d);
 
 ---
 
+### IncrementalFixedLagSmoother2D
+
+**ヘッダー**: `gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp`
+
+**説明**: 2D SLAM専用のFixed-Lag Smootherラッパー。`IncrementalFixedLagSmootherExt`を継承し、型安全なAPIと2D専用の便利なヘルパーメソッドを提供します。
+
+#### 主な特徴
+
+- **型安全な2D API**: `getPose2()`, `getVector2()`など、Pose2専用のメソッド
+- **便利な軌跡抽出**: タイムスタンプ付きPose2軌跡を簡単に取得
+- **統計情報**: 変数数、ファクター数、タイムスタンプ情報の取得
+- **デバッグ支援**: `printStatus()`で状態を一目で確認
+- **一貫した設計**: 他の2Dコンポーネントと同じ設計パターン
+
+#### コンストラクタ
+
+```cpp
+IncrementalFixedLagSmoother2D(
+    double smoother_lag = 5.0,
+    const gtsam::ISAM2Params& parameters = DefaultISAM2Params()
+);
+```
+
+**パラメータ**:
+- `smoother_lag`: 保持する時間ウィンドウの長さ（秒）。デフォルトは5秒
+- `parameters`: ISAM2パラメータ。デフォルトは2D最適化用の推奨値
+
+**デフォルトISAM2パラメータ（2D用）**:
+```cpp
+params.relinearizeThreshold = 0.01;     // 2Dでは小さめの閾値
+params.relinearizeSkip = 1;
+params.enableRelinearization = true;
+params.evaluateNonlinearError = false;  // パフォーマンス重視
+params.factorization = gtsam::ISAM2Params::CHOLESKY;
+params.findUnusedFactorSlots = true;
+```
+
+#### 型安全な状態取得メソッド
+
+```cpp
+// Pose2の推定値を取得
+gtsam::Pose2 getPose2(gtsam::Key key) const;
+
+// Vector2の推定値を取得（速度など）
+Eigen::Vector2d getVector2(gtsam::Key key) const;
+
+// Pose2の共分散行列を取得（3x3: [x, y, θ]）
+gtsam::Matrix3 getPose2Covariance(gtsam::Key key) const;
+```
+
+#### 軌跡・統計情報メソッド
+
+```cpp
+// 2D軌跡を取得（Symbol 'x'の全Pose2をタイムスタンプ順）
+std::vector<std::pair<double, gtsam::Pose2>> getTrajectory2D() const;
+
+// スムーサーラグを取得
+double getSmootherLag() const;
+
+// 現在保持している状態変数の数
+size_t getNumVariables() const;
+
+// 現在のファクター数
+size_t getNumFactors() const;
+
+// 最新のタイムスタンプ（秒）
+double getLatestTimestamp() const;
+
+// 指定キーのタイムスタンプを取得（秒）
+double getKeyTimestamp(gtsam::Key key) const;
+
+// 最適化の統計情報を取得
+const gtsam::ISAM2Result& getOptimizationStats() const;
+```
+
+#### デバッグメソッド
+
+```cpp
+// スムーサーの状態を出力（デバッグ用）
+void printStatus(const std::string& s = "") const;
+```
+
+**出力例**:
+```
+IncrementalFixedLagSmoother2D Status:
+  Smoother Lag: 5 seconds
+  Num Variables: 50
+  Num Factors: 95
+  Latest Timestamp: 10.5
+  Last Update:
+    Variables Reeliminated: 3
+    Variables Relinearized: 5
+    Cliques: 12
+```
+
+#### 完全な使用例
+
+```cpp
+#include <gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp>
+#include <gtsam_points/d2/factors/integrated_icp_factor_2d.hpp>
+#include <gtsam_points/d2/factors/reintegrated_imu_factor_2d.hpp>
+
+using namespace gtsam_points;
+
+// 5秒のラグで初期化
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;
+IncrementalFixedLagSmoother2D smoother(5.0, params);
+
+// メインループ
+for (int i = 0; i < scan_count; ++i) {
+    double current_time = i * 0.1;  // 10Hz
+
+    gtsam::NonlinearFactorGraph new_factors;
+    gtsam::Values new_values;
+    gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+    // Pose2を追加
+    gtsam::Key pose_i = gtsam::Symbol('x', i);
+    gtsam::Key pose_j = gtsam::Symbol('x', i + 1);
+    new_values.insert(pose_j, gtsam::Pose2(x, y, theta));
+    timestamps[pose_j] = current_time;
+
+    // 速度を追加
+    gtsam::Key vel_i = gtsam::Symbol('v', i);
+    gtsam::Key vel_j = gtsam::Symbol('v', i + 1);
+    new_values.insert(vel_j, Eigen::Vector2d(vx, vy));
+    timestamps[vel_j] = current_time;
+
+    // IMUバイアスを追加（初回のみ、後は再利用）
+    gtsam::Key bias_key = gtsam::Symbol('b', 0);
+    if (i == 0) {
+        new_values.insert(bias_key, ImuBias2D::Zero());
+        timestamps[bias_key] = current_time;
+    }
+
+    // ICPファクターを追加
+    auto icp_factor = gtsam::make_shared<IntegratedICPFactor2D>(
+        pose_i, pose_j,
+        target_scan, source_scan,
+        target_kdtree,
+        correspondences
+    );
+    new_factors.add(icp_factor);
+
+    // IMUファクターを追加
+    auto imu_factor = gtsam::make_shared<ReintegratedImuFactor2D>(
+        pose_i, vel_i, pose_j, vel_j, bias_key,
+        imu_measurements
+    );
+    new_factors.add(imu_factor);
+
+    // 更新実行
+    smoother.update(new_factors, new_values, timestamps);
+
+    // 型安全な推定値取得
+    gtsam::Pose2 estimated_pose = smoother.getPose2(pose_j);
+    Eigen::Vector2d estimated_vel = smoother.getVector2(vel_j);
+    gtsam::Matrix3 pose_cov = smoother.getPose2Covariance(pose_j);
+
+    // 不確実性（標準偏差）を計算
+    double std_x = std::sqrt(pose_cov(0, 0));
+    double std_y = std::sqrt(pose_cov(1, 1));
+    double std_theta = std::sqrt(pose_cov(2, 2));
+
+    std::cout << "Frame " << i << ": "
+              << "pose=(" << estimated_pose.x() << ", "
+              << estimated_pose.y() << ", "
+              << estimated_pose.theta() << "), "
+              << "uncertainty=(" << std_x << ", " << std_y
+              << ", " << std_theta << ")" << std::endl;
+
+    // 10フレームごとに状態を表示
+    if (i % 10 == 0) {
+        smoother.printStatus("SLAM Status: ");
+    }
+}
+
+// 最終的な軌跡を取得
+auto trajectory = smoother.getTrajectory2D();
+std::cout << "Final trajectory (" << trajectory.size() << " poses):" << std::endl;
+for (const auto& [timestamp, pose] : trajectory) {
+    std::cout << "  t=" << timestamp
+              << ": (" << pose.x() << ", " << pose.y()
+              << ", " << pose.theta() << ")" << std::endl;
+}
+
+// 統計情報
+std::cout << "\nFinal statistics:" << std::endl;
+std::cout << "  Total variables: " << smoother.getNumVariables() << std::endl;
+std::cout << "  Total factors: " << smoother.getNumFactors() << std::endl;
+std::cout << "  Latest timestamp: " << smoother.getLatestTimestamp() << " s" << std::endl;
+```
+
+#### 用途
+
+- **リアルタイム2Dロボットナビゲーション**: 移動ロボットのオンライン位置推定
+- **オンライン2D SLAM**: スキャンマッチング + IMU統合
+- **長時間動作アプリケーション**: メモリ効率的で無制限に動作可能
+- **メモリ制約環境**: エッジデバイス、組み込みシステム
+
+#### 基底クラスメソッドの使用
+
+`IncrementalFixedLagSmootherExt`のすべてのメソッドも利用可能です：
+
+```cpp
+// テンプレートを使った汎用的な取得
+gtsam::Pose2 pose = smoother.calculateEstimate<gtsam::Pose2>(key);
+
+// GTSAMネイティブな全値取得
+gtsam::Values all_values = smoother.calculateEstimate();
+
+// GTSAMネイティブな更新
+smoother.update(new_factors, new_values, timestamps);
+```
+
+---
+
 ## ユーティリティ
 
 ### BSpline2D

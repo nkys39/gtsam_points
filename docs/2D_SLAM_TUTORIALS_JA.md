@@ -6,7 +6,8 @@
 2. [ロバストマッチング: GICPとGNC](#ロバストマッチング-gicpとgnc)
 3. [リアルタイムSLAM: 連続時間マッチング](#リアルタイムslam-連続時間マッチング)
 4. [IMU統合: センサーフュージョン](#imu統合-センサーフュージョン)
-5. [高度な応用: 完全なSLAMシステム](#高度な応用-完全なslamシステム)
+5. [Fixed-Lag Smoother: メモリ効率的なオンラインSLAM](#fixed-lag-smoother-メモリ効率的なオンラインslam)
+6. [高度な応用: 完全なSLAMシステム](#高度な応用-完全なslamシステム)
 
 ---
 
@@ -500,6 +501,406 @@ int main() {
     return 0;
 }
 ```
+
+---
+
+## Fixed-Lag Smoother: メモリ効率的なオンラインSLAM
+
+### 目標
+`IncrementalFixedLagSmoother2D`を使って、メモリ使用量を一定に保ちながら長時間動作する2D SLAMシステムを構築。
+
+### Fixed-Lag Smootherとは？
+
+**従来のバッチ最適化の問題**:
+- 全ての状態変数とファクターを保持
+- 時間経過とともにメモリ使用量と計算時間が線形に増加
+- 長時間動作には不向き
+
+**Fixed-Lag Smootherの解決策**:
+- 一定時間ウィンドウ内の状態のみを保持（例: 直近5秒）
+- 古い状態は**周辺化** (marginalization) により除去
+- メモリと計算量が一定 → **無制限に動作可能**
+
+### ステップ1: 基本的なFixed-Lag SLAM
+
+```cpp
+#include <gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp>
+#include <gtsam_points/d2/factors/integrated_icp_factor_2d.hpp>
+#include <gtsam_points/d2/types/point_cloud_2d_cpu.hpp>
+#include <gtsam_points/d2/ann/kdtree_2d.hpp>
+#include <gtsam/slam/PriorFactor.h>
+
+using namespace gtsam_points;
+
+int main() {
+    // Fixed-Lag Smootherの初期化
+    // 5秒のウィンドウ = 10Hzで50フレーム
+    gtsam::ISAM2Params params;
+    params.relinearizeThreshold = 0.01;
+    params.relinearizeSkip = 1;
+
+    IncrementalFixedLagSmoother2D smoother(5.0, params);  // 5秒のラグ
+
+    // データ読み込み（仮想データ）
+    std::vector<PointCloud2DCPU::Ptr> scans = load_scans("data/");
+    double dt = 0.1;  // 10Hz
+
+    // 初期ポーズの事前分布
+    gtsam::NonlinearFactorGraph init_factors;
+    gtsam::Values init_values;
+    gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+    gtsam::Key pose0 = gtsam::Symbol('x', 0);
+    gtsam::Pose2 initial_pose(0, 0, 0);
+
+    init_values.insert(pose0, initial_pose);
+    timestamps[pose0] = 0.0;
+
+    // 事前分布（初期位置を固定）
+    auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+        gtsam::Vector3(0.01, 0.01, 0.01)
+    );
+    init_factors.add(gtsam::PriorFactor<gtsam::Pose2>(
+        pose0, initial_pose, prior_noise
+    ));
+
+    smoother.update(init_factors, init_values, timestamps);
+
+    // メインループ
+    for (size_t i = 1; i < scans.size(); ++i) {
+        double current_time = i * dt;
+
+        // 現在と前のポーズキー
+        gtsam::Key pose_prev = gtsam::Symbol('x', i - 1);
+        gtsam::Key pose_curr = gtsam::Symbol('x', i);
+
+        // 新しいファクターと値
+        gtsam::NonlinearFactorGraph new_factors;
+        gtsam::Values new_values;
+        gtsam::FixedLagSmoother::KeyTimestampMap new_timestamps;
+
+        // オドメトリによる初期推定
+        gtsam::Pose2 prev_pose = smoother.getPose2(pose_prev);
+        gtsam::Pose2 odom_delta = estimate_odometry(scans[i-1], scans[i]);
+        gtsam::Pose2 init_pose = prev_pose.compose(odom_delta);
+
+        new_values.insert(pose_curr, init_pose);
+        new_timestamps[pose_curr] = current_time;
+
+        // ICPファクターの構築
+        auto target_kdtree = std::make_shared<KdTree2D>(scans[i-1]);
+
+        auto icp_factor = gtsam::make_shared<IntegratedICPFactor2D>(
+            pose_prev, pose_curr,
+            scans[i-1], scans[i],
+            target_kdtree
+        );
+        new_factors.add(icp_factor);
+
+        // 更新実行
+        smoother.update(new_factors, new_values, new_timestamps);
+
+        // 推定結果を取得
+        gtsam::Pose2 estimated_pose = smoother.getPose2(pose_curr);
+
+        // ステータス表示（10フレームごと）
+        if (i % 10 == 0) {
+            std::cout << "\n=== Frame " << i << " ===" << std::endl;
+            std::cout << "Estimated pose: ("
+                      << estimated_pose.x() << ", "
+                      << estimated_pose.y() << ", "
+                      << estimated_pose.theta() << ")" << std::endl;
+
+            smoother.printStatus();
+
+            // メモリ使用量が一定であることを確認
+            std::cout << "Variables in window: "
+                      << smoother.getNumVariables() << std::endl;
+        }
+    }
+
+    // 最終的な軌跡を取得
+    auto trajectory = smoother.getTrajectory2D();
+    save_trajectory(trajectory, "trajectory.txt");
+
+    return 0;
+}
+```
+
+### ステップ2: IMU統合付きFixed-Lag SLAM
+
+```cpp
+#include <gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp>
+#include <gtsam_points/d2/factors/integrated_icp_factor_2d.hpp>
+#include <gtsam_points/d2/factors/reintegrated_imu_factor_2d.hpp>
+#include <gtsam_points/d2/types/point_cloud_2d_cpu.hpp>
+#include <gtsam_points/d2/ann/kdtree_2d.hpp>
+#include <gtsam/slam/PriorFactor.h>
+
+using namespace gtsam_points;
+
+int main() {
+    // IMUパラメータ
+    auto imu_params = std::make_shared<PreintegrationParams2D>();
+    imu_params->n_gravity = Eigen::Vector2d(0.0, -9.81);  // 重力
+    imu_params->accelerometer_noise_sigma = 0.1;
+    imu_params->gyroscope_noise_sigma = 0.01;
+    imu_params->use_2nd_order_integration = true;
+
+    // Fixed-Lag Smoother
+    gtsam::ISAM2Params params;
+    params.relinearizeThreshold = 0.01;
+    IncrementalFixedLagSmoother2D smoother(5.0, params);
+
+    // 初期状態
+    gtsam::Key pose0 = gtsam::Symbol('x', 0);
+    gtsam::Key vel0 = gtsam::Symbol('v', 0);
+    gtsam::Key bias_key = gtsam::Symbol('b', 0);
+
+    gtsam::Pose2 init_pose(0, 0, 0);
+    Eigen::Vector2d init_vel = Eigen::Vector2d::Zero();
+    ImuBias2D init_bias = ImuBias2D::Zero();
+
+    gtsam::NonlinearFactorGraph init_factors;
+    gtsam::Values init_values;
+    gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+    init_values.insert(pose0, init_pose);
+    init_values.insert(vel0, init_vel);
+    init_values.insert(bias_key, init_bias);
+
+    timestamps[pose0] = 0.0;
+    timestamps[vel0] = 0.0;
+    timestamps[bias_key] = 0.0;
+
+    // 事前分布
+    auto pose_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+        gtsam::Vector3(0.01, 0.01, 0.01)
+    );
+    auto vel_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+        Eigen::Vector2d(0.01, 0.01)
+    );
+    auto bias_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+        Eigen::Vector3d(0.1, 0.1, 0.01)
+    );
+
+    init_factors.add(gtsam::PriorFactor<gtsam::Pose2>(
+        pose0, init_pose, pose_prior_noise
+    ));
+    init_factors.add(gtsam::PriorFactor<Eigen::Vector2d>(
+        vel0, init_vel, vel_prior_noise
+    ));
+    init_factors.add(gtsam::PriorFactor<ImuBias2D>(
+        bias_key, init_bias, bias_prior_noise
+    ));
+
+    smoother.update(init_factors, init_values, timestamps);
+
+    // データ読み込み
+    std::vector<PointCloud2DCPU::Ptr> scans = load_scans("data/scans/");
+    std::vector<ImuData> imu_data = load_imu("data/imu.txt");
+
+    double scan_dt = 0.1;  // 10Hz
+    size_t imu_idx = 0;
+
+    // メインループ
+    for (size_t i = 1; i < scans.size(); ++i) {
+        double prev_time = (i - 1) * scan_dt;
+        double curr_time = i * scan_dt;
+
+        gtsam::Key pose_prev = gtsam::Symbol('x', i - 1);
+        gtsam::Key vel_prev = gtsam::Symbol('v', i - 1);
+        gtsam::Key pose_curr = gtsam::Symbol('x', i);
+        gtsam::Key vel_curr = gtsam::Symbol('v', i);
+
+        // IMU計測を積分
+        ReintegratedImuMeasurements2D imu_preint(imu_params, init_bias);
+
+        while (imu_idx < imu_data.size() &&
+               imu_data[imu_idx].timestamp <= curr_time) {
+            const auto& imu = imu_data[imu_idx];
+
+            if (imu.timestamp > prev_time) {
+                double dt_imu = (imu_idx == 0) ? 0.01 :
+                    imu.timestamp - imu_data[imu_idx - 1].timestamp;
+
+                imu_preint.integrateMeasurement(
+                    imu.acceleration,  // Eigen::Vector2d
+                    imu.angular_velocity,  // double (ωz)
+                    dt_imu
+                );
+            }
+            imu_idx++;
+        }
+
+        // 新しい値とファクター
+        gtsam::NonlinearFactorGraph new_factors;
+        gtsam::Values new_values;
+        gtsam::FixedLagSmoother::KeyTimestampMap new_timestamps;
+
+        // IMUに基づく初期推定
+        gtsam::Pose2 prev_pose = smoother.getPose2(pose_prev);
+        Eigen::Vector2d prev_vel = smoother.getVector2(vel_prev);
+
+        // 簡易的な初期化（実際はIMU積分値を使用）
+        double dt = scan_dt;
+        Eigen::Vector2d new_pos = prev_pose.translation() + prev_vel * dt;
+        double new_theta = prev_pose.theta() + imu_preint.deltaRij();
+
+        new_values.insert(pose_curr, gtsam::Pose2(new_pos.x(), new_pos.y(), new_theta));
+        new_values.insert(vel_curr, prev_vel + imu_preint.deltaVij() / dt);
+
+        new_timestamps[pose_curr] = curr_time;
+        new_timestamps[vel_curr] = curr_time;
+
+        // IMUファクター
+        auto imu_factor = gtsam::make_shared<ReintegratedImuFactor2D>(
+            pose_prev, vel_prev,
+            pose_curr, vel_curr,
+            bias_key,
+            imu_preint
+        );
+        new_factors.add(imu_factor);
+
+        // 10フレームごとにICPファクターを追加
+        if (i % 10 == 0) {
+            auto target_kdtree = std::make_shared<KdTree2D>(scans[i-10]);
+
+            auto icp_factor = gtsam::make_shared<IntegratedICPFactor2D>(
+                gtsam::Symbol('x', i - 10), pose_curr,
+                scans[i-10], scans[i],
+                target_kdtree
+            );
+            new_factors.add(icp_factor);
+        }
+
+        // 更新
+        smoother.update(new_factors, new_values, new_timestamps);
+
+        // 推定結果
+        gtsam::Pose2 est_pose = smoother.getPose2(pose_curr);
+        Eigen::Vector2d est_vel = smoother.getVector2(vel_curr);
+
+        if (i % 10 == 0) {
+            std::cout << "\n=== Frame " << i << " ===" << std::endl;
+            std::cout << "Pose: (" << est_pose.x() << ", "
+                      << est_pose.y() << ", " << est_pose.theta() << ")" << std::endl;
+            std::cout << "Velocity: (" << est_vel.x() << ", "
+                      << est_vel.y() << ")" << std::endl;
+
+            smoother.printStatus("  ");
+        }
+    }
+
+    // 軌跡保存
+    auto trajectory = smoother.getTrajectory2D();
+    save_trajectory_with_uncertainty(trajectory, "slam_trajectory.txt");
+
+    std::cout << "\n=== Final Statistics ===" << std::endl;
+    std::cout << "Total processed frames: " << scans.size() << std::endl;
+    std::cout << "Final window size: " << smoother.getNumVariables() << " variables" << std::endl;
+    std::cout << "Final factors: " << smoother.getNumFactors() << std::endl;
+
+    return 0;
+}
+```
+
+### ステップ3: リアルタイム性能の監視
+
+```cpp
+#include <chrono>
+
+// パフォーマンス測定
+struct PerformanceMonitor {
+    std::chrono::high_resolution_clock::time_point start;
+    std::vector<double> update_times;
+
+    void start_frame() {
+        start = std::chrono::high_resolution_clock::now();
+    }
+
+    void end_frame() {
+        auto end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double, std::milli>(end - start).count();
+        update_times.push_back(elapsed);
+    }
+
+    void print_stats() const {
+        double avg = 0.0;
+        double max_time = 0.0;
+
+        for (double t : update_times) {
+            avg += t;
+            max_time = std::max(max_time, t);
+        }
+        avg /= update_times.size();
+
+        std::cout << "Performance Statistics:" << std::endl;
+        std::cout << "  Average update time: " << avg << " ms" << std::endl;
+        std::cout << "  Max update time: " << max_time << " ms" << std::endl;
+        std::cout << "  Real-time capable (< 100ms): "
+                  << (avg < 100.0 ? "YES" : "NO") << std::endl;
+    }
+};
+
+// メインループに追加
+PerformanceMonitor perf;
+
+for (size_t i = 1; i < scans.size(); ++i) {
+    perf.start_frame();
+
+    // ... SLAM処理 ...
+    smoother.update(new_factors, new_values, new_timestamps);
+
+    perf.end_frame();
+}
+
+perf.print_stats();
+```
+
+### 重要なポイント
+
+**1. スムーサーラグの選択**:
+```cpp
+// ラグ = センサー周波数 × 保持フレーム数
+double lag = (1.0 / scan_rate) * num_frames_to_keep;
+
+// 例: 10Hzセンサーで50フレーム保持
+double lag = (1.0 / 10.0) * 50 = 5.0;  // 5秒
+```
+
+**2. メモリ使用量の確認**:
+```cpp
+// 変数数が一定に保たれているか確認
+if (i % 100 == 0) {
+    size_t num_vars = smoother.getNumVariables();
+    std::cout << "Window size: " << num_vars << " variables" << std::endl;
+
+    // 想定: (フレーム数) × (状態数/フレーム)
+    // 例: 50フレーム × 2状態(pose+vel) = 100変数 (+バイアス)
+    assert(num_vars <= 110);  // 上限チェック
+}
+```
+
+**3. ISAM2パラメータのチューニング**:
+```cpp
+// リアルタイム性重視
+params.relinearizeThreshold = 0.1;     // 粗め→速い
+params.relinearizeSkip = 10;           // 再線形化を減らす
+params.evaluateNonlinearError = false; // エラー計算スキップ
+
+// 精度重視
+params.relinearizeThreshold = 0.001;   // 細かく→遅いが正確
+params.relinearizeSkip = 1;            // 毎回再線形化
+params.evaluateNonlinearError = true;  // エラー計算実施
+```
+
+### まとめ
+
+- **Fixed-Lag Smoother**: 長時間動作可能なオンラインSLAM
+- **一定メモリ**: 古い状態を周辺化してメモリ効率化
+- **リアルタイム**: ISAM2ベースで高速インクリメンタル更新
+- **IMU統合**: センサーフュージョンで高精度な軌跡推定
 
 ---
 

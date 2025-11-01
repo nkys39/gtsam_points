@@ -508,6 +508,56 @@ smoother.update(new_factors, new_values, timestamps);
 gtsam::Pose2 pose = smoother.calculateEstimate<gtsam::Pose2>(pose_key);
 ```
 
+#### IncrementalFixedLagSmoother2D
+2D SLAM専用のFixed-Lag Smootherラッパー。型安全なAPIと便利なヘルパーメソッドを提供。
+
+**ヘッダー**: `gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp`
+
+**使用例（2D専用）**:
+```cpp
+#include <gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d.hpp>
+
+// 5秒のラグで初期化（2D最適化パラメータ）
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;
+IncrementalFixedLagSmoother2D smoother(5.0, params);
+
+// Pose2で使用
+gtsam::NonlinearFactorGraph new_factors;
+gtsam::Values new_values;
+gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+gtsam::Key pose_key = gtsam::Symbol('x', frame_id);
+new_values.insert(pose_key, gtsam::Pose2(x, y, theta));
+timestamps[pose_key] = current_time;
+
+new_factors.add(gtsam::make_shared<IntegratedICPFactor2D>(...));
+smoother.update(new_factors, new_values, timestamps);
+
+// 型安全なPose2取得
+gtsam::Pose2 pose = smoother.getPose2(pose_key);
+
+// 共分散行列取得 (3x3)
+gtsam::Matrix3 cov = smoother.getPose2Covariance(pose_key);
+
+// 2D軌跡取得（タイムスタンプ付き）
+auto trajectory = smoother.getTrajectory2D();
+for (const auto& [timestamp, pose] : trajectory) {
+  std::cout << "t=" << timestamp << ": " << pose << std::endl;
+}
+
+// 統計情報表示
+smoother.printStatus("SLAM Status: ");
+```
+
+**主な機能**:
+- `getPose2(key)`: 型安全なPose2取得
+- `getVector2(key)`: Vector2取得（速度など）
+- `getPose2Covariance(key)`: 3x3共分散行列取得
+- `getTrajectory2D()`: タイムスタンプ付き軌跡取得
+- `printStatus()`: デバッグ情報表示
+- `getNumVariables()`, `getNumFactors()`: 統計情報
+
 #### ISAM2Ext
 拡張ISAM2オプティマイザー。2D/3D両対応。
 
