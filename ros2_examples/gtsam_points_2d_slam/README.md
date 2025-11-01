@@ -4,18 +4,71 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 
 ## 概要
 
-このパッケージは、gtsam_pointsの2D SLAM機能を使用して、TurtleBot3シミュレーション環境で動作する**6種類の異なる2D SLAM実装例**を提供します。
+このパッケージは、gtsam_pointsの2D SLAM機能を使用して、TurtleBot3シミュレーション環境で動作する**段階的なチュートリアル**を提供します。各機能を独立したノードとして実装し、理解しやすく、比較しやすい構成になっています。
 
-### 6つの実装例
+### チュートリアル全体像
 
-| 実装 | ノード名 | 特徴 | 用途 |
-|------|----------|------|------|
-| **1. LiDARオドメトリ** | `lidar_odometry_node` | スキャンマッチングのみ、グラフ最適化なし | 高速な軌跡推定、デッドレコニング |
-| **2. 基本SLAM** | `slam_node` | ISAM2によるグラフSLAM、ループクロージャーなし | 小規模環境での高精度マッピング |
-| **3. ループクロージャー付きSLAM** | `slam_with_loop_closure_node` | ループクロージャー検出と因子追加 | 大規模環境、長時間運用 |
-| **4. Wheel Odometry統合SLAM** | `slam_with_wheel_odom_node` | ホイールオドメトリとLiDARの融合 | 高精度かつロバストな位置推定 |
-| **5. IMU統合SLAM** | `slam_with_imu_node` | IMU事前積分でLiDARを補完 | 高速移動、動的環境 |
-| **6. Fixed-lag Smoothing SLAM** | `slam_with_fixed_lag_node` | スライディングウィンドウ最適化 | 長時間運用、メモリ効率重視 |
+#### ✅ 実装済み（6つ）
+
+| # | 実装 | ノード名 | 特徴 | 用途 |
+|---|------|----------|------|------|
+| **1** | LiDARオドメトリ | `lidar_odometry_node` | スキャンマッチングのみ、グラフ最適化なし | 高速な軌跡推定、デッドレコニング |
+| **2** | 基本SLAM | `slam_node` | ISAM2によるグラフSLAM、ループクロージャーなし | 小規模環境での高精度マッピング |
+| **3** | ループクロージャー付きSLAM | `slam_with_loop_closure_node` | ループクロージャー検出と因子追加 | 大規模環境、長時間運用 |
+| **4** | Wheel Odometry統合SLAM | `slam_with_wheel_odom_node` | ホイールオドメトリとLiDARの融合 | 高精度かつロバストな位置推定 |
+| **5** | IMU統合SLAM | `slam_with_imu_node` | IMU事前積分でLiDARを補完 | 高速移動、動的環境 |
+| **6** | Fixed-lag Smoothing SLAM | `slam_with_fixed_lag_node` | スライディングウィンドウ最適化 | 長時間運用、メモリ効率重視 |
+
+#### 🚧 未実装（計画中）
+
+| # | カテゴリ | 実装予定 | 説明 |
+|---|---------|---------|------|
+| **7** | 連続時間SLAM | `slam_with_ct_icp_node` | CT-ICP: モーション補償付きICP、高速移動対応 |
+| **8** | 連続時間SLAM | `slam_with_ct_gicp_node` | CT-GICP: モーション補償付きGICP、より高精度 |
+| **9** | グローバルレジストレーション | `slam_with_ransac_node` | RANSAC: ロバスト初期推定、リローカライゼーション |
+| **10** | グローバルレジストレーション | `slam_with_gnc_node` | GNC: Graduated Non-Convexity、外れ値ロバスト |
+| **11** | セグメンテーション | `slam_with_segmentation_node` | Region Growing/Min-Cut: 動的物体除去、意味マップ |
+
+### 機能の組み合わせ可能性
+
+#### 🔄 排他的（どれか1つ選択）
+
+| カテゴリ | 選択肢 | 現状 |
+|---------|--------|------|
+| **スキャンマッチング** | ICP / GICP / VGICP / CT-ICP / CT-GICP | 1,2,7,8で比較可能 |
+| **オプティマイザ** | ISAM2 / Fixed-lag Smoother | 2-5 vs 6で比較可能 |
+| **初期推定** | なし / RANSAC / GNC | 9,10で比較予定 |
+
+#### ✅ 組み合わせ可能
+
+- **IMU統合** (5): 任意のスキャンマッチング + 任意のオプティマイザと組み合わせ可
+- **Wheel Odometry統合** (4): 任意のスキャンマッチング + 任意のオプティマイザと組み合わせ可
+- **ループクロージャー** (3): ISAM2と組み合わせて使用（Fixed-lagでは効果薄）
+- **セグメンテーション** (11): 前処理として任意のSLAMと組み合わせ可
+
+### 特徴量推定について
+
+gtsam_pointsライブラリには **法線推定** (`normal_estimation_2d`) と **共分散推定** (`covariance_estimation_2d`) が含まれています。
+
+**現在の実装での扱い**:
+- **自動計算**: `IntegratedGICPFactor2D` と `IntegratedVGICPFactor2D` ファクターが内部で自動的に法線と共分散を計算
+- **明示的な呼び出し不要**: ユーザーがこれらの関数を直接呼ぶ必要なし
+- **使用箇所**: ノード2（基本SLAM）、3（ループクロージャー）、4（Wheel統合）、5（IMU統合）、6（Fixed-lag）で使用
+
+**パラメータ**:
+- `k_neighbors`: 近傍点数（デフォルト: 10）- GICP/VGICPファクター内部で使用
+
+**明示的に使いたい場合**:
+```cpp
+#include <gtsam_points/d2/features/normal_estimation_2d.hpp>
+#include <gtsam_points/d2/features/covariance_estimation_2d.hpp>
+
+// 法線推定
+estimate_normals_2d(*point_cloud, 10);  // 10近傍で法線推定
+
+// 共分散推定
+estimate_covariances_2d(*point_cloud);  // 共分散推定
+```
 
 ---
 
@@ -517,15 +570,68 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 
 *ループクロージャー検出時はさらに増加
 
-## 今後の改善予定
+## 実装ロードマップ
 
+### 📋 Phase 1: 基本機能（完了 ✅）
+
+- [x] 1. LiDARオドメトリ (`lidar_odometry_node`)
+- [x] 2. 基本SLAM (`slam_node`)
+- [x] 3. ループクロージャー付きSLAM (`slam_with_loop_closure_node`)
+- [x] 4. Wheel Odometry統合SLAM (`slam_with_wheel_odom_node`)
+- [x] 5. IMU統合SLAM (`slam_with_imu_node`)
+- [x] 6. Fixed-lag Smoothing SLAM (`slam_with_fixed_lag_node`)
+
+### 🚧 Phase 2: 連続時間SLAM（次の実装）
+
+- [ ] 7. CT-ICP SLAM (`slam_with_ct_icp_node`)
+  - モーション補償付きICP
+  - タイムスタンプ付きスキャンデータ対応
+  - 高速移動時の歪み補正
+
+- [ ] 8. CT-GICP SLAM (`slam_with_ct_gicp_node`)
+  - モーション補償付きGICP
+  - より高精度な連続時間マッチング
+
+### 🔮 Phase 3: グローバルレジストレーション
+
+- [ ] 9. RANSAC SLAM (`slam_with_ransac_node`)
+  - ロバストな初期推定
+  - リローカライゼーション機能
+  - 誘拐問題への対応
+
+- [ ] 10. GNC SLAM (`slam_with_gnc_node`)
+  - Graduated Non-Convexity最適化
+  - 外れ値にロバスト
+  - より精度の高いグローバルマッチング
+
+### 🎯 Phase 4: セグメンテーション
+
+- [ ] 11. Segmentation SLAM (`slam_with_segmentation_node`)
+  - Region Growing / Min-Cut セグメンテーション
+  - 動的物体の検出・除去
+  - 静的環境のみでのSLAM
+  - 意味的マッピング
+
+### 🌟 Phase 5: 統合・最適化
+
+- [ ] 統合例ノード（ループ+IMU+セグメンテーション）
 - [ ] マップの保存・読み込み機能
 - [ ] RViz用の設定ファイル追加
-- [ ] Continuous-Time SLAM (CT-ICP/CT-GICP)の統合
-- [ ] Global Registration (RANSAC/GNC)の統合
-- [ ] Segmentation (RegionGrowing/MinCut)の統合
 - [ ] パフォーマンスの最適化
 - [ ] ベンチマークデータセットでの評価
+- [ ] 実機（実TurtleBot3）での動作確認
+
+### 📖 使い方
+
+各Phaseは独立しており、興味のある機能から試すことができます：
+
+```bash
+# Phase 1の例を試す
+ros2 launch gtsam_points_2d_slam slam_with_loop_closure.launch.py
+
+# Phase 2が実装されたら...
+ros2 launch gtsam_points_2d_slam slam_with_ct_icp.launch.py
+```
 
 ## ライセンス
 
