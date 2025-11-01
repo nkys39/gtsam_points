@@ -15,6 +15,23 @@ gtsam_pointsの2D SLAM拡張は、平面環境でのロボットナビゲーシ�
 
 ## アーキテクチャ
 
+### 2D専用 vs 2D/3D汎用コンポーネント
+
+このライブラリは以下の2種類のコンポーネントから構成されています：
+
+**2D専用コンポーネント** (`include/gtsam_points/d2/`):
+- **ファクター**: `IntegratedICPFactor2D`, `IntegratedGICPFactor2D`, `ReintegratedImuFactor2D`など
+- **特徴量推定**: `normal_estimation_2d`, `covariance_estimation_2d`
+- **レジストレーション**: `Alignment2D`, `RANSAC2D`, `GNC2D`
+- **ポイントクラウド**: `PointCloud2D`, `LaserScan`, `GaussianGridMap2D`
+- **ユーティリティ**: `BSpline2D`
+
+**2D/3D汎用コンポーネント** (`include/gtsam_points/optimizers/`):
+- **オプティマイザー**: `IncrementalFixedLagSmootherExt`, `ISAM2Ext`, `LevenbergMarquardtExt`, `DoglegOptimizerExt`
+  - これらは**Pose2でもPose3でもそのまま使用可能**
+  - 2D専用の実装は不要
+  - テンプレート機構により型安全に使用可能
+
 ### 座標系と表現
 
 ```
@@ -456,6 +473,68 @@ SE(2)上のB-スプライン補間。
 - 連続時間軌跡補間
 - 速度/加速度推定
 - IMU-LiDAR同期
+
+### 8. オプティマイザー (optimizers/) - **2D/3D汎用**
+
+**重要**: オプティマイザーは**すべて2D/3D汎用**です。Pose2でもPose3でもそのまま使用できます。
+
+#### IncrementalFixedLagSmootherExt
+ISAM2ベースのFixed-Lag Smoother。Pose2/Pose3に対応。
+
+**ヘッダー**: `gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp`
+
+**使用例（2D）**:
+```cpp
+#include <gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp>
+
+// 5秒のラグで初期化（2D用パラメータ）
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;  // 2Dでは小さめ
+IncrementalFixedLagSmootherExt smoother(5.0, params);
+
+// Pose2で使用
+gtsam::NonlinearFactorGraph new_factors;
+gtsam::Values new_values;
+gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+gtsam::Key pose_key = gtsam::Symbol('x', frame_id);
+new_values.insert(pose_key, gtsam::Pose2(x, y, theta));
+timestamps[pose_key] = current_time;
+
+new_factors.add(gtsam::make_shared<IntegratedICPFactor2D>(...));
+smoother.update(new_factors, new_values, timestamps);
+
+// テンプレートで型指定して取得
+gtsam::Pose2 pose = smoother.calculateEstimate<gtsam::Pose2>(pose_key);
+```
+
+#### ISAM2Ext
+拡張ISAM2オプティマイザー。2D/3D両対応。
+
+**ヘッダー**: `gtsam_points/optimizers/isam2_ext.hpp`
+
+#### LevenbergMarquardtExt
+拡張Levenberg-Marquardtオプティマイザー。2D/3D両対応。
+
+**ヘッダー**: `gtsam_points/optimizers/levenberg_marquardt_ext.hpp`
+
+#### DoglegOptimizerExt
+Dogleg法オプティマイザー。2D/3D両対応。
+
+**ヘッダー**: `gtsam_points/optimizers/dogleg_optimizer_ext.hpp`
+
+**共通の特徴**:
+- **汎用性**: Pose2/Pose3/Vector2/Vector3など任意の状態変数に対応
+- **GTSAMネイティブ**: 標準的なGTSAMインターフェース
+- **型安全**: テンプレートで型を指定
+
+**2D SLAMでの推奨パラメータ**:
+```cpp
+// ISAM2 (Fixed-Lag Smoother含む)
+params.relinearizeThreshold = 0.01;  // 2D: 0.01, 3D: 0.1
+params.relinearizeSkip = 1;
+params.factorization = gtsam::ISAM2Params::CHOLESKY;
+```
 
 ## 並列処理
 

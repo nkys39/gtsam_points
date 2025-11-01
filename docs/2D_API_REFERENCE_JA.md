@@ -8,7 +8,8 @@
 4. [最近傍探索](#最近傍探索)
 5. [レジストレーション](#レジストレーション)
 6. [セグメンテーション](#セグメンテーション)
-7. [ユーティリティ](#ユーティリティ)
+7. [オプティマイザー](#オプティマイザー)
+8. [ユーティリティ](#ユーティリティ)
 
 ---
 
@@ -664,6 +665,149 @@ MinCutResult2D min_cut_2d(
     size_t source_index,
     const MinCutParams2D& params = MinCutParams2D()
 );
+```
+
+---
+
+## オプティマイザー
+
+### IncrementalFixedLagSmootherExt
+
+**ヘッダー**: `gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp`
+
+**重要**: このクラスは**2D/3D汎用**です。Pose2でもPose3でもそのまま使用できます。2D専用の実装は不要です。
+
+**説明**: ISAM2ベースのFixed-Lag Smoother。一定時間ウィンドウ内の状態のみを保持し、古い状態を周辺化することでメモリと計算量を一定に保ちながらリアルタイム最適化を実現。
+
+#### 主な特徴
+
+- **2D/3D汎用**: Pose2、Pose3、Vector2、Vector3など任意の状態変数に対応
+- **一定メモリ使用量**: 時間ウィンドウ外の状態は自動的に周辺化
+- **ISAM2ベース**: インクリメンタルな更新で高速動作
+- **GTSAMネイティブ**: 標準的なFixedLagSmootherインターフェース
+
+#### コンストラクタ
+
+```cpp
+IncrementalFixedLagSmootherExt(
+    double smoother_lag = 5.0,
+    const gtsam::ISAM2Params& parameters = gtsam::ISAM2Params()
+);
+```
+
+**パラメータ**:
+- `smoother_lag`: 保持する時間ウィンドウの長さ（秒）。この時間より古い状態は周辺化される
+- `parameters`: ISAM2パラメータ
+
+#### 基本メソッド
+
+```cpp
+// 更新（ファクターと値を追加）
+gtsam::ISAM2Result update(
+    const gtsam::NonlinearFactorGraph& new_factors,
+    const gtsam::Values& new_values,
+    const KeyTimestampMap& timestamps
+);
+
+// 推定値を取得
+template<typename T>
+T calculateEstimate(gtsam::Key key) const;
+
+// 共分散を取得
+gtsam::Matrix marginalCovariance(gtsam::Key key) const;
+
+// 全ての推定値を取得
+gtsam::Values calculateEstimate() const;
+```
+
+#### 2D SLAMでの使用例
+
+```cpp
+#include <gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp>
+#include <gtsam/geometry/Pose2.h>
+
+using namespace gtsam_points;
+
+// 5秒のラグで初期化（2D用パラメータ）
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;  // 2Dでは小さめの閾値
+params.relinearizeSkip = 1;
+params.enableRelinearization = true;
+params.evaluateNonlinearError = false;
+params.factorization = gtsam::ISAM2Params::CHOLESKY;
+
+IncrementalFixedLagSmootherExt smoother(5.0, params);
+
+// 新しいファクターと値を追加
+gtsam::NonlinearFactorGraph new_factors;
+gtsam::Values new_values;
+gtsam::FixedLagSmoother::KeyTimestampMap timestamps;
+
+// Pose2を追加
+gtsam::Key pose_key = gtsam::Symbol('x', frame_id);
+new_values.insert(pose_key, gtsam::Pose2(x, y, theta));
+timestamps[pose_key] = current_time;
+
+// Vector2 (速度) を追加
+gtsam::Key vel_key = gtsam::Symbol('v', frame_id);
+new_values.insert(vel_key, Eigen::Vector2d(vx, vy));
+timestamps[vel_key] = current_time;
+
+// ファクターを追加（ICP、IMUなど）
+new_factors.add(gtsam::make_shared<IntegratedICPFactor2D>(...));
+new_factors.add(gtsam::make_shared<ReintegratedImuFactor2D>(...));
+
+// 更新実行
+auto result = smoother.update(new_factors, new_values, timestamps);
+
+// 推定値を取得（テンプレートで型指定）
+gtsam::Pose2 estimated_pose = smoother.calculateEstimate<gtsam::Pose2>(pose_key);
+Eigen::Vector2d estimated_vel = smoother.calculateEstimate<Eigen::Vector2d>(vel_key);
+
+// 共分散を取得（Pose2の場合は3x3）
+gtsam::Matrix3 covariance = smoother.marginalCovariance(pose_key);
+
+// 全軌跡を取得（Symbol 'x'のみ）
+gtsam::Values all_values = smoother.calculateEstimate();
+for (const auto& key_value : all_values) {
+    gtsam::Key key = key_value.key;
+    if (gtsam::Symbol(key).chr() == 'x') {
+        gtsam::Pose2 pose = all_values.at<gtsam::Pose2>(key);
+        std::cout << "Pose " << gtsam::Symbol(key).index()
+                  << ": " << pose.translation().transpose()
+                  << " theta=" << pose.theta() << std::endl;
+    }
+}
+```
+
+#### 推奨パラメータ（2D SLAM用）
+
+```cpp
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;    // 2Dでは小さめ（3Dは0.1推奨）
+params.relinearizeSkip = 1;
+params.enableRelinearization = true;
+params.evaluateNonlinearError = false; // パフォーマンス重視
+params.factorization = gtsam::ISAM2Params::CHOLESKY;
+params.findUnusedFactorSlots = true;
+```
+
+#### 用途
+
+- **リアルタイムロボットナビゲーション**: 移動ロボットのオンライン位置推定（2D/3D）
+- **オンライン SLAM**: スキャンマッチング + IMU統合
+- **長時間動作**: メモリ効率的で無制限に動作可能
+
+#### 3D SLAMでの使用例
+
+```cpp
+// 同じクラスをPose3でも使用可能
+gtsam::Key pose_key_3d = gtsam::Symbol('x', frame_id);
+new_values.insert(pose_key_3d, gtsam::Pose3(...));  // Pose3
+timestamps[pose_key_3d] = current_time;
+
+// 後で取得
+gtsam::Pose3 pose_3d = smoother.calculateEstimate<gtsam::Pose3>(pose_key_3d);
 ```
 
 ---
