@@ -8,7 +8,7 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 
 ### チュートリアル全体像
 
-#### ✅ 実装済み（6つ）
+#### ✅ 実装済み（7つ）
 
 | # | 実装 | ノード名 | 特徴 | 用途 |
 |---|------|----------|------|------|
@@ -18,12 +18,12 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 | **4** | Wheel Odometry統合SLAM | `slam_with_wheel_odom_node` | ホイールオドメトリとLiDARの融合 | 高精度かつロバストな位置推定 |
 | **5** | IMU統合SLAM | `slam_with_imu_node` | IMU事前積分でLiDARを補完 | 高速移動、動的環境 |
 | **6** | Fixed-lag Smoothing SLAM | `slam_with_fixed_lag_node` | スライディングウィンドウ最適化 | 長時間運用、メモリ効率重視 |
+| **7** | CT-ICP SLAM | `slam_with_ct_icp_node` | 連続時間ICP、モーション補償 | 高速移動、歪み補正 |
 
 #### 🚧 未実装（計画中）
 
 | # | カテゴリ | 実装予定 | 説明 |
 |---|---------|---------|------|
-| **7** | 連続時間SLAM | `slam_with_ct_icp_node` | CT-ICP: モーション補償付きICP、高速移動対応 |
 | **8** | 連続時間SLAM | `slam_with_ct_gicp_node` | CT-GICP: モーション補償付きGICP、より高精度 |
 | **9** | グローバルレジストレーション | `slam_with_ransac_node` | RANSAC: ロバスト初期推定、リローカライゼーション |
 | **10** | グローバルレジストレーション | `slam_with_gnc_node` | GNC: Graduated Non-Convexity、外れ値ロバスト |
@@ -432,6 +432,144 @@ Keyframes: 150, Window size: 100, Marginalized: 50
 
 ---
 
+## 7. CT-ICP SLAM（slam_with_ct_icp_node）
+
+### 特徴
+- ✅ **モーション補償**: スキャン中のロボット移動を補正
+- ✅ **連続時間補間**: 各点のタイムスタンプで姿勢を補間
+- ✅ **高速移動対応**: 移動しながらスキャンする場合でも高精度
+- ✅ **歪み補正**: 回転・並進運動による点群の歪みを除去
+- ⚠️ **2ポーズ推定**: スキャン開始と終了の2つのポーズを同時推定
+
+### アーキテクチャ
+```
+LaserScan (timestamped) → Motion Compensation → CT-ICP Factor → ISAM2
+         ↓                        ↓                    ↓
+    time_increment     各点で姿勢補間      2ポーズ最適化
+```
+
+### CT-ICPの仕組み
+
+**連続時間スキャンマッチング**は以下の問題を解決します：
+
+#### 問題: スキャン中のロボット移動
+```
+通常のICP/GICP（静止仮定）:
+  全点が同じ時刻にスキャンされたと仮定
+  → 高速移動時にスキャンが歪む
+
+CT-ICP（連続時間）:
+  各点のタイムスタンプを考慮
+  → 移動による歪みを補正
+```
+
+#### タイムスタンプ付き点群
+```
+LaserScan: 360点, time_increment = 0.001秒
+
+点0:  t=0.000s  →  補間姿勢 = Pose_t0 * (0.000 / 0.360) + Pose_t1 * (1 - 0.000/0.360)
+点1:  t=0.001s  →  補間姿勢 = Pose_t0 * (0.001 / 0.360) + Pose_t1 * (1 - 0.001/0.360)
+...
+点359: t=0.359s →  補間姿勢 = Pose_t0 * (0.359 / 0.360) + Pose_t1 * (1 - 0.359/0.360)
+
+正規化タイムスタンプ: [0, 1]の範囲にスケール
+```
+
+#### 2ポーズ推定
+```
+State variables:
+  Pose_t0: スキャン開始時のロボット姿勢
+  Pose_t1: スキャン終了時のロボット姿勢
+
+各点の姿勢は SE(2) 上で補間:
+  Pose(t) = Pose_t0 ⊕ Exp(t * Log(Pose_t0^{-1} ⊕ Pose_t1))
+
+where:
+  t ∈ [0, 1]: 正規化タイムスタンプ
+  ⊕: SE(2)上の合成
+  Exp/Log: Lie代数の指数写像/対数写像
+```
+
+### ファクターグラフ構造
+```
+スキャン0:
+x0_t0 (start) --[CT-ICP Factor]-- x0_t1 (end)
+      |                                |
+   Pose at                         Pose at
+   scan start                      scan end
+
+スキャン1:
+x0_t1 == x1_t0 --[CT-ICP Factor]-- x1_t1
+   (continuity)           |
+              [Between Factor]
+
+連続性制約: スキャンiの終了 == スキャンi+1の開始
+```
+
+### 使用方法
+```bash
+export TURTLEBOT3_MODEL=waffle_pi
+ros2 launch gtsam_points_2d_slam slam_with_ct_icp.launch.py
+
+# 高速移動でも歪みが補正される
+ros2 run turtlebot3_teleop teleop_keyboard
+```
+
+### パラメータ（`config/slam_with_ct_icp_params.yaml`）
+- `keyframe_distance`: キーフレーム間距離 [m]（デフォルト: 0.5）
+- `keyframe_angle`: キーフレーム間角度 [rad]（デフォルト: 0.3）
+- `max_correspondence_distance`: 対応点探索距離 [m]（デフォルト: 1.0）
+
+**注**: タイムスタンプは `sensor_msgs/LaserScan` の `time_increment` フィールドから自動取得
+
+### 通常のICPとの比較
+
+| 項目 | ICP/GICP | CT-ICP |
+|------|----------|--------|
+| 仮定 | スキャン中ロボットは静止 | スキャン中ロボットは移動 |
+| ポーズ数 | 1個/スキャン | 2個/スキャン（開始・終了） |
+| タイムスタンプ | 不要 | 必須（各点） |
+| 歪み補正 | ❌ | ✅ |
+| 高速移動 | 精度低下 | 高精度維持 |
+| 計算コスト | 低 | 中（~1.5倍） |
+
+### 適用シーン
+
+1. **高速移動ロボット**
+   - 速度 > 0.5 m/s
+   - スキャン時間が長い（> 0.1秒）
+
+2. **回転しながらのスキャン**
+   - その場回転
+   - 旋回移動
+
+3. **精度が重要なアプリケーション**
+   - 高精度マッピング
+   - 狭い環境での移動
+
+### 実装の詳細
+
+**タイムスタンプ計算**:
+```cpp
+// ROS2 LaserScanから各点のタイムスタンプを計算
+for (size_t i = 0; i < msg->ranges.size(); ++i) {
+  const double timestamp = msg->time_increment * i;
+  const double normalized_time = timestamp / scan_duration;  // [0, 1]
+  timestamps.push_back(normalized_time);
+}
+```
+
+**SE(2)上の補間**:
+- 単純な線形補間ではなく、SE(2)多様体上の測地線補間
+- 回転と並進を同時に補間
+- Lie代数の指数写像を使用
+
+### トピック
+- Subscribe: `/scan` (sensor_msgs/LaserScan with time_increment)
+- Publish: `slam_odom`, `slam_path`
+
+---
+
 ## 必要な依存関係
 
 ### システム依存
@@ -581,9 +719,9 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 - [x] 5. IMU統合SLAM (`slam_with_imu_node`)
 - [x] 6. Fixed-lag Smoothing SLAM (`slam_with_fixed_lag_node`)
 
-### 🚧 Phase 2: 連続時間SLAM（次の実装）
+### 🚧 Phase 2: 連続時間SLAM（進行中）
 
-- [ ] 7. CT-ICP SLAM (`slam_with_ct_icp_node`)
+- [x] 7. CT-ICP SLAM (`slam_with_ct_icp_node`) ✅
   - モーション補償付きICP
   - タイムスタンプ付きスキャンデータ対応
   - 高速移動時の歪み補正
@@ -615,11 +753,34 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 ### 🌟 Phase 5: 統合・最適化
 
 - [ ] 統合例ノード（ループ+IMU+セグメンテーション）
-- [ ] マップの保存・読み込み機能
 - [ ] RViz用の設定ファイル追加
 - [ ] パフォーマンスの最適化
 - [ ] ベンチマークデータセットでの評価
 - [ ] 実機（実TurtleBot3）での動作確認
+
+### 💾 Phase 6: オフライン最適化（計画中）
+
+- [ ] マップとグラフの保存機能
+  - ポイントクラウドマップの保存
+  - ファクターグラフの永続化
+  - ポーズグラフのエクスポート
+
+- [ ] マップとグラフの読み込み機能
+  - 保存済みマップの読み込み
+  - グラフの復元
+  - リローカライゼーション
+
+- [ ] オフライン最適化ツール
+  - 保存済みグラフの再最適化
+  - 手動ループクロージャー追加
+  - ポーズの手動調整
+
+- [ ] キーフレーム管理機能
+  - キーフレームのマージ
+  - 不要なキーフレームの削除
+  - グラフの間引き
+
+**目的**: オンラインSLAMで収集したデータを後処理で改善
 
 ### 📖 使い方
 
@@ -629,8 +790,10 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
 # Phase 1の例を試す
 ros2 launch gtsam_points_2d_slam slam_with_loop_closure.launch.py
 
-# Phase 2が実装されたら...
+# Phase 2のCT-ICPを試す
 ros2 launch gtsam_points_2d_slam slam_with_ct_icp.launch.py
+
+# Phase 3以降は実装後に追加予定...
 ```
 
 ## ライセンス

@@ -181,6 +181,32 @@ target_link_libraries(slam_with_fixed_lag_node
   gtsam
 )
 
+# Add SLAM with CT-ICP node executable
+add_executable(slam_with_ct_icp_node
+  src/slam_with_ct_icp_node.cpp
+)
+
+target_include_directories(slam_with_ct_icp_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ ament_target_dependencies(slam_with_ct_icp_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_ct_icp_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
 install(TARGETS
   slam_node
@@ -189,6 +215,7 @@ install(TARGETS
   slam_with_wheel_odom_node
   slam_with_imu_node
   slam_with_fixed_lag_node
+  slam_with_ct_icp_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+
+    # Topics
+    scan_topic: "scan"
+
+    # Keyframe selection
+    keyframe_distance: 0.5     # meters
+    keyframe_angle: 0.3        # radians (~17 degrees)
+
+    # CT-ICP parameters
+    max_correspondence_distance: 1.0  # meters
+
+    # Note: CT-ICP uses timestamps from LaserScan.time_increment
+    # to compensate for motion during scanning
