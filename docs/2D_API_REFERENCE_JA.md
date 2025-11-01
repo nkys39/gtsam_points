@@ -1030,6 +1030,273 @@ smoother.update(new_factors, new_values, timestamps);
 
 ---
 
+### IncrementalFixedLagSmoother2DWithFallback
+
+**ヘッダー**: `gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d_with_fallback.hpp`
+
+**説明**: フォールバック機能付き2D Fixed-Lag Smoother。最適化が失敗した場合に自動的にスムーザーを再構築してリカバリーする。
+
+#### 主な特徴
+
+- **自動リカバリー**: 例外発生時に自動的にフォールバック
+- **ロバスト性**: 不安定な環境でも動作継続
+- **IncrementalFixedLagSmoother2Dと同じAPI**: ドロップイン置換可能
+
+#### 使用例
+
+```cpp
+#include <gtsam_points/d2/optimizers/incremental_fixed_lag_smoother_2d_with_fallback.hpp>
+
+// フォールバック機能付きで初期化
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;
+IncrementalFixedLagSmoother2DWithFallback smoother(5.0, params);
+
+// 通常通り使用
+smoother.update(new_factors, new_values, timestamps);
+
+// フォールバックが発生したか確認
+if (smoother.fallbackHappened()) {
+    std::cerr << "Warning: Fallback occurred during optimization!" << std::endl;
+}
+
+// 推定値を取得（例外時も安全）
+gtsam::Pose2 pose = smoother.getPose2(pose_key);
+```
+
+#### フォールバック動作
+
+1. `update()`や`calculateEstimate()`で例外が発生
+2. 現在の状態とファクターを保存
+3. 新しいスムーザーを再構築
+4. ユーザーコードに例外を伝播させずに継続
+
+---
+
+### ISAM2_2D
+
+**ヘッダー**: `gtsam_points/d2/optimizers/isam2_2d.hpp`
+
+**説明**: 2D SLAM用ISAM2インクリメンタル最適化器。ベイズ木を用いた効率的なインクリメンタル非線形最適化。
+
+#### 主な特徴
+
+- **インクリメンタル更新**: 新しい観測が到着するたびに効率的に更新
+- **選択的再線形化**: 必要な変数のみを再線形化
+- **ループクロージャ対応**: グラフ構造の変化に対応
+
+#### コンストラクタ
+
+```cpp
+ISAM2_2D(const gtsam::ISAM2Params& params = DefaultISAM2Params());
+```
+
+#### 主要メソッド
+
+```cpp
+// 更新
+ISAM2ResultExt update(
+    const gtsam::NonlinearFactorGraph& newFactors,
+    const gtsam::Values& newTheta
+);
+
+// Pose2取得
+gtsam::Pose2 getPose2(gtsam::Key key) const;
+
+// 軌跡取得
+std::vector<gtsam::Pose2> getTrajectory2D() const;
+
+// 変数の周辺化
+void marginalizeLeaves(const gtsam::KeyVector& leafKeys);
+```
+
+#### 使用例
+
+```cpp
+#include <gtsam_points/d2/optimizers/isam2_2d.hpp>
+#include <gtsam_points/d2/factors/integrated_icp_factor_2d.hpp>
+
+// ISAM2パラメータ
+gtsam::ISAM2Params params;
+params.relinearizeThreshold = 0.01;
+params.relinearizeSkip = 1;
+
+ISAM2_2D isam2(params);
+
+// 初期ポーズ
+gtsam::NonlinearFactorGraph initial_graph;
+gtsam::Values initial_values;
+
+gtsam::Key pose0 = gtsam::Symbol('x', 0);
+initial_values.insert(pose0, gtsam::Pose2(0, 0, 0));
+
+auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
+    gtsam::Vector3(0.01, 0.01, 0.01)
+);
+initial_graph.add(gtsam::PriorFactor<gtsam::Pose2>(
+    pose0, gtsam::Pose2(), prior_noise
+));
+
+isam2.update(initial_graph, initial_values);
+
+// メインループ
+for (int i = 1; i < num_frames; ++i) {
+    gtsam::NonlinearFactorGraph new_factors;
+    gtsam::Values new_values;
+
+    gtsam::Key pose_i = gtsam::Symbol('x', i);
+    new_values.insert(pose_i, initial_guess);
+
+    // ICPファクターを追加
+    auto icp_factor = gtsam::make_shared<IntegratedICPFactor2D>(...);
+    new_factors.add(icp_factor);
+
+    // 更新
+    auto result = isam2.update(new_factors, new_values);
+
+    // 推定値を取得
+    gtsam::Pose2 pose = isam2.getPose2(pose_i);
+
+    // 統計情報
+    std::cout << "Relinearized: " << result.variablesRelinearized << " variables" << std::endl;
+}
+
+// 最終軌跡を取得
+auto trajectory = isam2.getTrajectory2D();
+```
+
+---
+
+### LevenbergMarquardtOptimizer2D
+
+**ヘッダー**: `gtsam_points/d2/optimizers/levenberg_marquardt_optimizer_2d.hpp`
+
+**説明**: 2D SLAM用Levenberg-Marquardt法バッチ最適化器。Trust-region法とGauss-Newton法のハイブリッド。
+
+#### 主な特徴
+
+- **ロバスト収束**: 初期値が悪くても収束しやすい
+- **バッチ最適化**: 全データを一括処理
+- **ループクロージャ後の最適化**: グローバル最適化に最適
+
+#### コンストラクタ
+
+```cpp
+LevenbergMarquardtOptimizer2D(
+    const gtsam::NonlinearFactorGraph& graph,
+    const gtsam::Values& initialValues,
+    const LevenbergMarquardtExtParams& params = DefaultLMParams()
+);
+```
+
+#### 主要メソッド
+
+```cpp
+// 最適化実行
+const gtsam::Values& optimize();
+
+// Pose2取得
+gtsam::Pose2 getPose2(gtsam::Key key) const;
+
+// 軌跡取得
+std::vector<gtsam::Pose2> getTrajectory2D() const;
+
+// 現在の誤差
+double getCurrentError() const;
+
+// 現在の反復回数
+int getCurrentIterations() const;
+```
+
+#### 使用例
+
+```cpp
+#include <gtsam_points/d2/optimizers/levenberg_marquardt_optimizer_2d.hpp>
+
+// ファクターグラフを構築
+gtsam::NonlinearFactorGraph graph;
+gtsam::Values initial_values;
+
+// ... ファクターと初期値を追加 ...
+
+// LMパラメータ
+LevenbergMarquardtExtParams params;
+params.setVerbosity("ERROR");
+params.setMaxIterations(100);
+params.setRelativeErrorTol(1e-5);
+
+// 最適化
+LevenbergMarquardtOptimizer2D optimizer(graph, initial_values, params);
+gtsam::Values result = optimizer.optimize();
+
+// 結果を取得
+auto trajectory = optimizer.getTrajectory2D();
+for (size_t i = 0; i < trajectory.size(); ++i) {
+    std::cout << "Pose " << i << ": " << trajectory[i] << std::endl;
+}
+
+// 統計情報
+optimizer.printStatus("Final: ");
+```
+
+---
+
+### DoglegOptimizer2D
+
+**ヘッダー**: `gtsam_points/d2/optimizers/dogleg_optimizer_2d.hpp`
+
+**説明**: 2D SLAM用Dogleg法バッチ最適化器。Trust-region法による効率的な非線形最適化。
+
+#### 主な特徴
+
+- **Trust-region法**: 信頼領域内で最適化
+- **効率的**: Levenberg-Marquardtより高速な場合がある
+- **大規模問題対応**: スパース行列を効率的に処理
+
+#### コンストラクタ
+
+```cpp
+DoglegOptimizer2D(
+    const gtsam::NonlinearFactorGraph& graph,
+    const gtsam::Values& initialValues,
+    const gtsam::DoglegParams& params = DefaultDoglegParams()
+);
+```
+
+#### 主要メソッド
+
+```cpp
+// 最適化実行
+const gtsam::Values& optimize();
+
+// Pose2取得
+gtsam::Pose2 getPose2(gtsam::Key key) const;
+
+// Trust-region半径取得
+double getDelta() const;
+```
+
+#### 使用例
+
+```cpp
+#include <gtsam_points/d2/optimizers/dogleg_optimizer_2d.hpp>
+
+// Doglegパラメータ
+gtsam::DoglegParams params;
+params.setVerbosity("ERROR");
+params.setMaxIterations(100);
+
+// 最適化
+DoglegOptimizer2D optimizer(graph, initial_values, params);
+gtsam::Values result = optimizer.optimize();
+
+// Trust-region半径を確認
+double delta = optimizer.getDelta();
+std::cout << "Final trust-region radius: " << delta << std::endl;
+```
+
+---
+
 ## ユーティリティ
 
 ### BSpline2D
