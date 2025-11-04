@@ -577,8 +577,10 @@ for (size_t i = 0; i < msg->ranges.size(); ++i) {
 - ✅ **マップ保存**: ROSサービスでマップをファイルに保存
 - ✅ **ポイントクラウド保存**: キーフレームをPCD形式で保存
 - ✅ **ポーズグラフ保存**: 最適化されたポーズをJSON形式で保存
-- ✅ **データ永続化**: 長時間運用の結果を保存
-- 🚧 **マップ読み込み**: 保存されたマップの読み込み（実装予定）
+- ✅ **マップ読み込み**: 保存されたマップの完全復元
+- ✅ **グラフ再構築**: ISAM2ファクターグラフの復元
+- ✅ **ローカライゼーション**: 読み込んだマップ上での位置推定
+- ✅ **データ永続化**: 長時間運用の結果を保存・再利用
 - 🚧 **オフライン最適化**: 保存データの後処理（実装予定）
 
 ### アーキテクチャ
@@ -694,7 +696,7 @@ string message           # メッセージ
 uint32 num_keyframes     # 保存されたキーフレーム数
 ```
 
-#### LoadMap.srv（実装予定）
+#### LoadMap.srv
 ```
 # Request
 string directory_path    # 読み込み元ディレクトリ
@@ -706,6 +708,29 @@ bool success             # 成功/失敗
 string message           # メッセージ
 uint32 num_keyframes     # 読み込まれたキーフレーム数
 ```
+
+#### マップの読み込み
+```bash
+# 1. SLAMノード起動
+export TURTLEBOT3_MODEL=waffle_pi
+ros2 launch gtsam_points_2d_slam slam_with_map_save.launch.py
+
+# 2. 保存済みマップを読み込み（別ターミナル）
+ros2 service call /slam_with_map_save_node/load_map \
+  gtsam_points_2d_slam/srv/LoadMap \
+  "{directory_path: '/tmp/my_maps', map_name: 'turtlebot3_world'}"
+
+# 3. マップが読み込まれ、グラフが復元される
+# ログで以下のようなメッセージが表示される:
+# [slam_with_map_save]: Loading map: turtlebot3_world with 150 keyframes
+# [slam_with_map_save]: Map loaded: 150 keyframes, ready for localization
+```
+
+**マップ読み込み後の動作**:
+- キーフレームとポーズが復元される
+- ISAM2グラフが再構築される（PriorFactor + GICP/VGICPファクター）
+- 新しいスキャンを受信すると、読み込んだマップに対してローカライゼーション開始
+- 追加のスキャンをマップに統合可能
 
 ### 応用例
 
@@ -748,11 +773,19 @@ ros2 run gtsam_points_2d_slam map_merger \
 
 ### 今後の実装予定
 
-- [ ] マップ読み込み機能の実装
+- [x] マップ読み込み機能の実装 ✅
+  - PCDファイルからポイントクラウド読み込み
+  - JSONファイルからポーズ復元
+  - ISAM2グラフの再構築
+  - ローカライゼーション対応
 - [ ] オフライン最適化ツール
-- [ ] 手動ループクロージャー追加
-- [ ] キーフレームマージ/削除機能
-- [ ] GTSAMグラフのシリアライゼーション
+  - 保存済みグラフの再最適化
+  - 手動ループクロージャー追加
+  - ポーズの手動調整
+- [ ] キーフレーム管理機能
+  - キーフレームのマージ
+  - 不要なキーフレームの削除
+  - グラフの間引き
 
 ---
 
@@ -1190,8 +1223,11 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
   - ✅ ROSサービスでマップ保存
   - ✅ ポイントクラウドマップの保存（PCD形式）
   - ✅ ポーズグラフのエクスポート（JSON形式）
-  - 🚧 保存済みマップの読み込み（実装予定）
-  - 🚧 グラフの復元とリローカライゼーション（実装予定）
+  - ✅ 保存済みマップの読み込み
+  - ✅ グラフの復元とリローカライゼーション
+  - ✅ PCDファイルからポイントクラウド復元
+  - ✅ JSONファイルからポーズ復元
+  - ✅ ISAM2グラフの再構築（PriorFactor + GICP/VGICPファクター）
 
 - [ ] オフライン最適化ツール
   - 保存済みグラフの再最適化

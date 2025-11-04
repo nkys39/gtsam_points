@@ -36,6 +36,21 @@
 using namespace gtsam_points;
 namespace fs = std::filesystem;
 
+// Structures for loading map data
+struct PoseData {
+  int key;
+  double x;
+  double y;
+  double theta;
+};
+
+struct MapInfo {
+  std::string map_name;
+  int num_keyframes;
+  std::string created_at;
+  bool use_vgicp;
+};
+
 class SlamWithMapSaveNode : public rclcpp::Node
 {
 public:
@@ -344,7 +359,7 @@ private:
     }
   }
 
-  // Map load callback (basic implementation)
+  // Map load callback (full implementation)
   void loadMapCallback(
     const std::shared_ptr<gtsam_points_2d_slam::srv::LoadMap::Request> request,
     std::shared_ptr<gtsam_points_2d_slam::srv::LoadMap::Response> response)
@@ -352,18 +367,115 @@ private:
     RCLCPP_INFO(this->get_logger(), "Loading map from: %s/%s",
                 request->directory_path.c_str(), request->map_name.c_str());
 
-    // TODO: Implement map loading
-    // This is a placeholder - full implementation would:
-    // 1. Load all PCD files
-    // 2. Load poses from JSON
-    // 3. Reconstruct ISAM2 graph
-    // 4. Set initialized_ = true
+    try {
+      fs::path map_dir = fs::path(request->directory_path) / request->map_name;
+      fs::path keyframes_dir = map_dir / "keyframes";
+      fs::path poses_path = map_dir / "poses.json";
+      fs::path info_path = map_dir / "map_info.json";
 
-    response->success = false;
-    response->message = "Map loading not yet implemented";
-    response->num_keyframes = 0;
+      // Check if directory exists
+      if (!fs::exists(map_dir)) {
+        throw std::runtime_error("Map directory does not exist: " + map_dir.string());
+      }
 
-    RCLCPP_WARN(this->get_logger(), "Map loading not yet implemented");
+      // Load map info
+      auto map_info = loadMapInfoJSON(info_path.string());
+      RCLCPP_INFO(this->get_logger(), "Loading map: %s with %d keyframes",
+                  map_info.map_name.c_str(), map_info.num_keyframes);
+
+      // Load poses
+      auto poses = loadPosesJSON(poses_path.string());
+      if (poses.empty()) {
+        throw std::runtime_error("No poses found in JSON file");
+      }
+
+      // Clear existing state
+      keyframes_.clear();
+      keyframe_poses_.clear();
+      keyframe_stamps_.clear();
+      graph_ = gtsam::NonlinearFactorGraph();
+      initial_estimates_.clear();
+      if (gridmap_) {
+        gridmap_ = std::make_shared<IncrementalGridMap2D>(voxel_resolution_);
+      }
+
+      // Reset ISAM2
+      gtsam::ISAM2Params isam2_params;
+      isam2_params.relinearizeThreshold = 0.1;
+      isam2_params.relinearizeSkip = 1;
+      isam2_ = std::make_shared<gtsam::ISAM2>(isam2_params);
+
+      // Load keyframes and reconstruct graph
+      for (int i = 0; i < map_info.num_keyframes; ++i) {
+        // Load PCD file
+        std::ostringstream filename;
+        filename << "keyframe_" << std::setw(6) << std::setfill('0') << i << ".pcd";
+        fs::path pcd_path = keyframes_dir / filename.str();
+
+        auto cloud = loadPointCloudPCD(pcd_path.string());
+        keyframes_.push_back(cloud);
+
+        // Find corresponding pose
+        if (i >= static_cast<int>(poses.size())) {
+          throw std::runtime_error("Pose index out of range");
+        }
+        gtsam::Pose2 pose(poses[i].x, poses[i].y, poses[i].theta);
+        keyframe_poses_.push_back(pose);
+        keyframe_stamps_.push_back(this->now());  // Use current time as placeholder
+
+        // Add to graph
+        gtsam::Symbol key('x', i);
+
+        if (i == 0) {
+          // Add prior factor for first pose
+          auto noise_model = gtsam::noiseModel::Diagonal::Sigmas(
+            (gtsam::Vector(3) << 0.01, 0.01, 0.01).finished());
+          graph_.add(gtsam::PriorFactor<gtsam::Pose2>(key, pose, noise_model));
+        } else {
+          // Add GICP/VGICP factor
+          if (use_vgicp_) {
+            gridmap_->insert(*keyframes_[i-1]);
+            auto vgicp_factor = gtsam::make_shared<IntegratedVGICPFactor2D>(
+              key, keyframes_[i-1], keyframes_[i], gridmap_);
+            vgicp_factor->set_max_correspondence_distance(max_correspondence_distance_);
+            graph_.add(vgicp_factor);
+          } else {
+            auto gicp_factor = gtsam::make_shared<IntegratedGICPFactor2D>(
+              key, keyframes_[i-1], keyframes_[i]);
+            gicp_factor->set_max_correspondence_distance(max_correspondence_distance_);
+            graph_.add(gicp_factor);
+          }
+        }
+
+        // Add initial estimate
+        initial_estimates_.insert(key, pose);
+      }
+
+      // Optimize with ISAM2
+      isam2_->update(graph_, initial_estimates_);
+      graph_.resize(0);
+      initial_estimates_.clear();
+
+      // Set state variables
+      key_counter_ = map_info.num_keyframes;
+      initialized_ = true;
+      current_pose_ = keyframe_poses_.back();
+      last_keyframe_pose_ = current_pose_;
+
+      response->success = true;
+      response->message = "Map loaded successfully";
+      response->num_keyframes = map_info.num_keyframes;
+
+      RCLCPP_INFO(this->get_logger(), "Map loaded: %d keyframes, ready for localization",
+                  map_info.num_keyframes);
+    }
+    catch (const std::exception& e) {
+      response->success = false;
+      response->message = std::string("Failed to load map: ") + e.what();
+      response->num_keyframes = 0;
+
+      RCLCPP_ERROR(this->get_logger(), "Failed to load map: %s", e.what());
+    }
   }
 
   // Helper: Save point cloud as PCD
@@ -454,6 +566,195 @@ private:
     file << "}\n";
 
     file.close();
+  }
+
+  // Helper: Load point cloud from PCD
+  std::shared_ptr<PointCloud2DCPU> loadPointCloudPCD(const std::string& filename)
+  {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open file: " + filename);
+    }
+
+    auto cloud = std::make_shared<PointCloud2DCPU>();
+    std::string line;
+    bool data_section = false;
+    size_t num_points = 0;
+
+    // Parse header
+    while (std::getline(file, line)) {
+      if (line.find("POINTS") == 0) {
+        std::istringstream iss(line);
+        std::string keyword;
+        iss >> keyword >> num_points;
+      }
+      else if (line.find("DATA ascii") == 0) {
+        data_section = true;
+        break;
+      }
+    }
+
+    if (!data_section) {
+      throw std::runtime_error("Invalid PCD file format: " + filename);
+    }
+
+    // Read point data
+    cloud->points.reserve(num_points);
+    while (std::getline(file, line)) {
+      std::istringstream iss(line);
+      double x, y;
+      if (iss >> x >> y) {
+        cloud->points.push_back(Eigen::Vector3d(x, y, 1.0));  // Homogeneous coordinates
+      }
+    }
+
+    file.close();
+
+    if (cloud->points.size() != num_points) {
+      RCLCPP_WARN(rclcpp::get_logger("slam_with_map_save"),
+                  "Expected %zu points but loaded %zu points",
+                  num_points, cloud->points.size());
+    }
+
+    return cloud;
+  }
+
+  // Helper: Load poses from JSON
+  std::vector<PoseData> loadPosesJSON(const std::string& filename)
+  {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open file: " + filename);
+    }
+
+    std::vector<PoseData> poses;
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    file.close();
+
+    // Simple JSON parsing for poses array
+    size_t poses_start = content.find("\"poses\"");
+    if (poses_start == std::string::npos) {
+      throw std::runtime_error("No 'poses' field found in JSON");
+    }
+
+    size_t array_start = content.find("[", poses_start);
+    size_t array_end = content.find("]", array_start);
+
+    if (array_start == std::string::npos || array_end == std::string::npos) {
+      throw std::runtime_error("Invalid poses array in JSON");
+    }
+
+    std::string poses_array = content.substr(array_start + 1, array_end - array_start - 1);
+
+    // Parse each pose object
+    size_t pos = 0;
+    while (true) {
+      size_t obj_start = poses_array.find("{", pos);
+      if (obj_start == std::string::npos) break;
+
+      size_t obj_end = poses_array.find("}", obj_start);
+      if (obj_end == std::string::npos) break;
+
+      std::string pose_obj = poses_array.substr(obj_start, obj_end - obj_start + 1);
+
+      PoseData pose;
+
+      // Parse key
+      size_t key_pos = pose_obj.find("\"key\"");
+      if (key_pos != std::string::npos) {
+        size_t colon = pose_obj.find(":", key_pos);
+        size_t comma = pose_obj.find(",", colon);
+        std::string key_str = pose_obj.substr(colon + 1, comma - colon - 1);
+        pose.key = std::stoi(key_str);
+      }
+
+      // Parse x
+      size_t x_pos = pose_obj.find("\"x\"");
+      if (x_pos != std::string::npos) {
+        size_t colon = pose_obj.find(":", x_pos);
+        size_t comma = pose_obj.find(",", colon);
+        std::string x_str = pose_obj.substr(colon + 1, comma - colon - 1);
+        pose.x = std::stod(x_str);
+      }
+
+      // Parse y
+      size_t y_pos = pose_obj.find("\"y\"");
+      if (y_pos != std::string::npos) {
+        size_t colon = pose_obj.find(":", y_pos);
+        size_t comma = pose_obj.find(",", colon);
+        std::string y_str = pose_obj.substr(colon + 1, comma - colon - 1);
+        pose.y = std::stod(y_str);
+      }
+
+      // Parse theta
+      size_t theta_pos = pose_obj.find("\"theta\"");
+      if (theta_pos != std::string::npos) {
+        size_t colon = pose_obj.find(":", theta_pos);
+        size_t end = pose_obj.find("\n", colon);
+        if (end == std::string::npos) end = pose_obj.length();
+        std::string theta_str = pose_obj.substr(colon + 1, end - colon - 1);
+        pose.theta = std::stod(theta_str);
+      }
+
+      poses.push_back(pose);
+      pos = obj_end + 1;
+    }
+
+    return poses;
+  }
+
+  // Helper: Load map info from JSON
+  MapInfo loadMapInfoJSON(const std::string& filename)
+  {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open file: " + filename);
+    }
+
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    file.close();
+
+    MapInfo info;
+
+    // Parse map_name
+    size_t name_pos = content.find("\"map_name\"");
+    if (name_pos != std::string::npos) {
+      size_t colon = content.find(":", name_pos);
+      size_t quote1 = content.find("\"", colon + 1);
+      size_t quote2 = content.find("\"", quote1 + 1);
+      info.map_name = content.substr(quote1 + 1, quote2 - quote1 - 1);
+    }
+
+    // Parse num_keyframes
+    size_t num_pos = content.find("\"num_keyframes\"");
+    if (num_pos != std::string::npos) {
+      size_t colon = content.find(":", num_pos);
+      size_t comma = content.find(",", colon);
+      std::string num_str = content.substr(colon + 1, comma - colon - 1);
+      info.num_keyframes = std::stoi(num_str);
+    }
+
+    // Parse created_at
+    size_t created_pos = content.find("\"created_at\"");
+    if (created_pos != std::string::npos) {
+      size_t colon = content.find(":", created_pos);
+      size_t quote1 = content.find("\"", colon + 1);
+      size_t quote2 = content.find("\"", quote1 + 1);
+      info.created_at = content.substr(quote1 + 1, quote2 - quote1 - 1);
+    }
+
+    // Parse use_vgicp
+    size_t vgicp_pos = content.find("\"use_vgicp\"");
+    if (vgicp_pos != std::string::npos) {
+      size_t colon = content.find(":", vgicp_pos);
+      size_t end = content.find("\n", colon);
+      std::string vgicp_str = content.substr(colon + 1, end - colon - 1);
+      info.use_vgicp = (vgicp_str.find("true") != std::string::npos);
+    }
+
+    return info;
   }
 
 private:
