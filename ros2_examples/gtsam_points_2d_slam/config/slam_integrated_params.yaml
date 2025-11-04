@@ -1,0 +1,89 @@
+slam_integrated:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    scan_topic: "scan"
+    imu_topic: "imu"
+
+    # Keyframe selection
+    keyframe_distance: 0.5      # Distance threshold [m]
+    keyframe_angle: 0.3          # Angle threshold [rad]
+
+    # Scan matching
+    use_vgicp: true              # Use VGICP (true) or GICP (false)
+
+    # ========================================
+    # Loop Closure Parameters
+    # ========================================
+    enable_loop_closure: true           # Enable loop closure detection
+    loop_search_radius: 10.0            # Search radius for loop candidates [m]
+    loop_min_chain_length: 10           # Minimum chain length before loop search
+
+    # ========================================
+    # IMU Integration Parameters
+    # ========================================
+    use_imu: true                       # Enable IMU integration
+    imu_acc_noise: 0.1                  # Accelerometer noise [m/s²]
+    imu_gyro_noise: 0.01                # Gyroscope noise [rad/s]
+    imu_acc_bias_noise: 0.001           # Accelerometer bias random walk [m/s³]
+    imu_gyro_bias_noise: 0.0001         # Gyroscope bias random walk [rad/s²]
+    gravity: 9.81                        # Gravity magnitude [m/s²]
+
+    # ========================================
+    # Segmentation Parameters
+    # ========================================
+    enable_segmentation: true                    # Enable dynamic object removal
+    region_growing_distance_threshold: 0.2       # Neighbor search distance [m]
+    region_growing_angle_threshold: 0.5          # Normal angle threshold [rad]
+    min_segment_size: 15                          # Minimum points in valid segment
+    normal_estimation_k: 10                       # K-nearest neighbors for normals
+    consistency_check_distance: 0.5               # Point-to-map consistency [m]
+    min_static_ratio: 0.3                         # Static threshold ratio (0-1)
+
+# =========================================================
+# INTEGRATED SLAM SYSTEM - Feature Combination
+# =========================================================
+#
+# This configuration enables the most advanced SLAM system by combining:
+#
+# 1. LOOP CLOSURE (Global Consistency)
+#    - Detects when robot revisits locations
+#    - Adds constraints to close loops in trajectory
+#    - Corrects accumulated drift globally
+#    - Essential for large-scale mapping
+#
+# 2. IMU INTEGRATION (High-Speed Motion)
+#    - Preintegrates IMU measurements between scans
+#    - Provides velocity and bias estimation
+#    - Handles high-speed motion and rapid turns
+#    - Reduces scan matching failures
+#
+# 3. SEGMENTATION (Dynamic Environment)
+#    - Segments scans into regions
+#    - Classifies static vs dynamic objects
+#    - Filters out moving objects
+#    - Produces clean maps in crowded environments
+#
+# Combined Benefits:
+# - Maximum robustness in challenging scenarios
+# - High accuracy with multi-sensor fusion
+# - Clean maps despite dynamic objects
+# - Global consistency over large areas
+# - Reliable operation at high speeds
+#
+# Use Cases:
+# - Warehouses with people and forklifts
+# - Office buildings with moving crowds
+# - Long-distance exploration missions
+# - High-speed robot operations
+# - Production environments
+#
+# Performance Trade-offs:
+# - Computation: Higher (3 advanced features)
+# - Memory: Moderate (keyframe-based)
+# - Accuracy: Highest
+# - Robustness: Maximum
+#
+# =========================================================

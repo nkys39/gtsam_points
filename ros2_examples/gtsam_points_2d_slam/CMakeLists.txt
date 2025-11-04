@@ -382,6 +382,54 @@ target_link_libraries(slam_with_segmentation_node
   gtsam
 )
 
+# Add Integrated SLAM node executable (Phase 5)
+add_executable(slam_integrated_node
+  src/slam_integrated_node.cpp
+)
+
+target_include_directories(slam_integrated_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_integrated_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_integrated_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
+# Add Keyframe Manager node executable (Phase 6)
+add_executable(keyframe_manager_node
+  src/keyframe_manager_node.cpp
+)
+
+target_include_directories(keyframe_manager_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(keyframe_manager_node
+  rclcpp
+  std_srvs
+)
+
+target_link_libraries(keyframe_manager_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
 install(TARGETS
   slam_node
@@ -397,6 +445,8 @@ install(TARGETS
   slam_with_ransac_node
   slam_with_gnc_node
   slam_with_segmentation_node
+  slam_integrated_node
+  keyframe_manager_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
