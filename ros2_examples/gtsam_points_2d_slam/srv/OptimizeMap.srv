@@ -1,0 +1,8 @@
+# Request: Optimize the current graph
+---
+# Response
+bool success            # Success flag
+string message          # Result message
+int32 num_iterations    # Number of optimization iterations performed
+float64 initial_error   # Initial graph error
+float64 final_error     # Final graph error after optimization

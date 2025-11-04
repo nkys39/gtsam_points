@@ -1,0 +1,13 @@
+# Request: Add a manual loop closure constraint between two keyframes
+int32 from_key      # Source keyframe index
+int32 to_key        # Target keyframe index
+float64 x           # Relative translation x (optional, if 0 will compute from scan matching)
+float64 y           # Relative translation y (optional)
+float64 theta       # Relative rotation (optional)
+bool auto_match     # If true, use scan matching to compute relative pose
+
+---
+# Response
+bool success        # Success flag
+string message      # Result message
+float64 match_score # Scan matching score (if auto_match was used)

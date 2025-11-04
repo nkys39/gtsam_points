@@ -24,6 +24,8 @@ find_package(tf2_geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SaveMap.srv"
   "srv/LoadMap.srv"
+  "srv/AddLoopClosure.srv"
+  "srv/OptimizeMap.srv"
 )
 
 # Find gtsam_points
@@ -270,6 +272,37 @@ target_link_libraries(slam_with_ct_gicp_node
   gtsam
 )
 
+# Add offline map optimizer node executable
+add_executable(offline_map_optimizer
+  src/offline_map_optimizer.cpp
+)
+
+target_include_directories(offline_map_optimizer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(offline_map_optimizer
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(offline_map_optimizer
+  gtsam_points::gtsam_points
+  gtsam
+)
+
+# Link service interfaces to offline_map_optimizer
+rosidl_target_interfaces(offline_map_optimizer
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
 # Install targets
 install(TARGETS
   slam_node
@@ -281,6 +314,7 @@ install(TARGETS
   slam_with_ct_icp_node
   slam_with_map_save_node
   slam_with_ct_gicp_node
+  offline_map_optimizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
