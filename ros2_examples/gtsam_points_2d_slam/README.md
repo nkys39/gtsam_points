@@ -8,7 +8,7 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 
 ### チュートリアル全体像
 
-#### ✅ 実装済み（10つ）
+#### ✅ 実装済み（11つ）
 
 | # | 実装 | ノード名 | 特徴 | 用途 |
 |---|------|----------|------|------|
@@ -22,12 +22,12 @@ ROS2実装例：gtsam_pointsライブラリを使用したTurtleBot3シミュレ
 | **8** | Map Save/Load SLAM | `slam_with_map_save_node` | マップ保存・読み込み (ROS service) | データ永続化、オフライン最適化 |
 | **9** | CT-GICP SLAM | `slam_with_ct_gicp_node` | 連続時間GICP、共分散ベースマッチング | より高精度な歪み補正 |
 | **10** | Offline Map Optimizer | `offline_map_optimizer` | 手動ループクロージャー、グラフ再最適化 | マップ品質向上、後処理 |
+| **11** | RANSAC SLAM | `slam_with_ransac_node` | RANSACロバストマッチング、リローカライゼーション | 外れ値環境、誘拐問題対応 |
 
 #### 🚧 未実装（計画中）
 
 | # | カテゴリ | 実装予定 | 説明 |
 |---|---------|---------|------|
-| **11** | グローバルレジストレーション | `slam_with_ransac_node` | RANSAC: ロバスト初期推定、リローカライゼーション |
 | **12** | グローバルレジストレーション | `slam_with_gnc_node` | GNC: Graduated Non-Convexity、外れ値ロバスト |
 | **13** | セグメンテーション | `slam_with_segmentation_node` | Region Growing/Min-Cut: 動的物体除去、意味マップ |
 
@@ -1190,21 +1190,24 @@ TurtleBot3 Gazebo環境での性能比較（参考値）：
   - 共分散ベースマッチング（Mahalanobis距離）
   - より高精度な連続時間マッチング
 
-### 🔮 Phase 3: グローバルレジストレーション
+### 🔮 Phase 3: グローバルレジストレーション（一部完了）
 
-- [ ] 9. RANSAC SLAM (`slam_with_ransac_node`)
-  - ロバストな初期推定
-  - リローカライゼーション機能
-  - 誘拐問題への対応
+- [x] 11. RANSAC SLAM (`slam_with_ransac_node`) ✅
+  - ✅ RANSAC-based robust scan matching
+  - ✅ Outlier rejection with inlier/outlier classification
+  - ✅ Relocalization for kidnapped robot problem
+  - ✅ Automatic tracking failure detection
+  - ✅ Inlier ratio reporting for match confidence
+  - ✅ Dual-factor optimization (RANSAC + GICP)
 
-- [ ] 10. GNC SLAM (`slam_with_gnc_node`)
+- [ ] 12. GNC SLAM (`slam_with_gnc_node`)
   - Graduated Non-Convexity最適化
   - 外れ値にロバスト
   - より精度の高いグローバルマッチング
 
 ### 🎯 Phase 4: セグメンテーション
 
-- [ ] 11. Segmentation SLAM (`slam_with_segmentation_node`)
+- [ ] 13. Segmentation SLAM (`slam_with_segmentation_node`)
   - Region Growing / Min-Cut セグメンテーション
   - 動的物体の検出・除去
   - 静的環境のみでのSLAM
