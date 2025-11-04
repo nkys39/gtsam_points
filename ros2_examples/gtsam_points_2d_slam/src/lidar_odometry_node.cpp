@@ -13,12 +13,16 @@
 
 #include <Eigen/Core>
 #include <gtsam/geometry/Pose2.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 
 #include <gtsam_points/d2/types/point_cloud_2d_cpu.hpp>
 #include <gtsam_points/d2/factors/integrated_gicp_factor_2d.hpp>
 #include <gtsam_points/d2/factors/integrated_vgicp_factor_2d.hpp>
 #include <gtsam_points/d2/ann/incremental_gridmap_2d.hpp>
 #include <gtsam_points/d2/registration/alignment_2d.hpp>
+#include <gtsam_points/d2/registration/registration_2d.hpp>
 
 using namespace gtsam_points;
 
@@ -219,27 +223,39 @@ private:
       return gtsam::Pose2(0.0, 0.0, 0.0);
     }
 
-    // Use simple registration against the map
-    RegistrationSetting2D setting;
-    setting.type = RegistrationType2D::VGICP;
-    setting.voxel_resolution = voxel_resolution_;
-    setting.max_correspondence_distance = max_correspondence_distance_;
-    setting.max_iterations = registration_max_iterations_;
-    setting.transformation_epsilon = registration_transformation_epsilon_;
+    // Create factor graph for scan-to-map matching
+    gtsam::NonlinearFactorGraph graph;
+    gtsam::Values initial_estimate;
 
-    // Create a temporary factor for matching
-    auto factor = gtsam::make_shared<IntegratedVGICPFactor2D>(
-      0,  // dummy key
+    // Use current pose as initial guess
+    gtsam::Symbol pose_key('x', 0);
+    initial_estimate.insert(pose_key, current_pose_);
+
+    // Create VGICP factor matching scan to map
+    auto vgicp_factor = gtsam::make_shared<IntegratedVGICPFactor2D>(
+      pose_key,
       scan,
-      gridmap_);
+      gridmap_
+    );
+    vgicp_factor->set_max_correspondence_distance(max_correspondence_distance_);
+    graph.add(vgicp_factor);
 
-    // Evaluate error at identity to get the matching result
-    // This is a simplified approach - in production you'd use proper optimization
-    gtsam::Pose2 estimated_pose(0.0, 0.0, 0.0);
+    // Optimize using Levenberg-Marquardt
+    gtsam::LevenbergMarquardtParams lm_params;
+    lm_params.setMaxIterations(registration_max_iterations_);
+    lm_params.setRelativeErrorTol(registration_transformation_epsilon_);
+    lm_params.setAbsoluteErrorTol(registration_transformation_epsilon_);
 
-    // Simple gradient descent or use the registration function
-    // For now, return identity (this is a placeholder)
-    return estimated_pose;
+    gtsam::LevenbergMarquardtOptimizer optimizer(graph, initial_estimate, lm_params);
+    gtsam::Values result = optimizer.optimize();
+
+    // Extract optimized pose
+    gtsam::Pose2 optimized_pose = result.at<gtsam::Pose2>(pose_key);
+
+    // Compute relative transformation from current pose
+    gtsam::Pose2 relative_pose = current_pose_.between(optimized_pose);
+
+    return relative_pose;
   }
 
   void publishOdometry(const rclcpp::Time& stamp)

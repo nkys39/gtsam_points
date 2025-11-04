@@ -24,6 +24,7 @@
 #include <gtsam_points/d2/factors/integrated_gicp_factor_2d.hpp>
 #include <gtsam_points/d2/factors/integrated_vgicp_factor_2d.hpp>
 #include <gtsam_points/d2/ann/incremental_gridmap_2d.hpp>
+#include <gtsam_points/d2/registration/registration_2d.hpp>
 
 using namespace gtsam_points;
 
@@ -199,15 +200,32 @@ private:
       return result;
     }
 
-    // Get the last keyframe
+    // Get the last keyframe as target
     auto target = keyframes_.back();
 
-    // Simple ICP-based scan matching for initial guess
-    // In a real implementation, you would use scan-to-map matching
-    // and integrate with the GTSAM factor graph
+    // Configure registration settings
+    RegistrationSetting2D setting;
+    setting.type = use_vgicp_ ? RegistrationType2D::VGICP : RegistrationType2D::GICP;
+    setting.voxel_resolution = voxel_resolution_;
+    setting.max_correspondence_distance = max_correspondence_distance_;
+    setting.max_iterations = 64;
+    setting.transformation_epsilon = 1e-3;
 
-    // For now, we'll use a simple constant velocity model
-    // This is a placeholder - in production you would implement proper scan matching
+    // Initial guess: identity (assume small motion between scans)
+    gtsam::Pose2 initial_guess(0.0, 0.0, 0.0);
+
+    // Perform scan-to-scan matching using align_scans_2d
+    auto registration_result = align_scans_2d(target, scan, initial_guess, setting);
+
+    // Extract results
+    result.relative_pose = registration_result.T_target_source;
+    result.fitness_score = registration_result.converged ?
+                          static_cast<double>(registration_result.num_inliers) / scan->size() : 0.0;
+
+    // Log if matching failed
+    if (!registration_result.converged) {
+      RCLCPP_WARN(this->get_logger(), "Scan matching did not converge");
+    }
 
     return result;
   }
