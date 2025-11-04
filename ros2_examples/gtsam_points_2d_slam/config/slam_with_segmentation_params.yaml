@@ -1,0 +1,28 @@
+slam_with_segmentation:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    scan_topic: "scan"
+
+    # Keyframe selection
+    keyframe_distance: 0.5      # Distance threshold [m]
+    keyframe_angle: 0.3          # Angle threshold [rad]
+
+    # Scan matching
+    use_vgicp: true              # Use VGICP (true) or GICP (false)
+    voxel_resolution: 0.1        # Voxel grid resolution [m]
+
+    # Region Growing Segmentation parameters
+    region_growing_radius: 0.2         # Search radius for neighbor finding [m]
+    region_growing_min_points: 10      # Minimum points to form a seed region
+    region_growing_smoothness: 0.5     # Smoothness threshold (0-1, lower = stricter)
+    min_segment_size: 15               # Minimum points in valid segment
+    max_segment_size: 1000             # Maximum points in valid segment
+
+    # Dynamic object detection parameters
+    dynamic_detection_threshold: 0.3   # Distance threshold for dynamic detection [m]
+    consistency_check_distance: 0.5    # Max distance for point-to-map consistency [m]
+    min_static_ratio: 0.3              # Minimum ratio of consistent points (0-1)
+                                       # Segments with >= this ratio are considered static

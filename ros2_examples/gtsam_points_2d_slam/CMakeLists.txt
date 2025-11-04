@@ -355,6 +355,33 @@ target_link_libraries(slam_with_gnc_node
   gtsam
 )
 
+# Add Segmentation SLAM node executable
+add_executable(slam_with_segmentation_node
+  src/slam_with_segmentation_node.cpp
+)
+
+target_include_directories(slam_with_segmentation_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ ament_target_dependencies(slam_with_segmentation_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_segmentation_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
 install(TARGETS
   slam_node
@@ -369,6 +396,7 @@ install(TARGETS
   offline_map_optimizer
   slam_with_ransac_node
   slam_with_gnc_node
+  slam_with_segmentation_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
