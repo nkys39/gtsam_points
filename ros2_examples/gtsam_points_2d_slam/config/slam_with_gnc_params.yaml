@@ -1,0 +1,21 @@
+slam_with_gnc:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    scan_topic: "scan"
+
+    # Keyframe selection
+    keyframe_distance: 0.5      # Distance threshold [m]
+    keyframe_angle: 0.3          # Angle threshold [rad]
+
+    # Scan matching
+    max_correspondence_distance: 1.0
+
+    # GNC (Graduated Non-Convexity) parameters
+    gnc_mu_init: 1.0            # Initial value of mu (control parameter)
+    gnc_mu_step: 1.4            # Mu update factor (mu *= mu_step each iteration)
+    gnc_max_iterations: 100     # Maximum GNC iterations
+    gnc_cost_threshold: 1.0e-5  # Convergence threshold for cost change
+    gnc_inlier_threshold: 0.1   # Distance threshold for inliers [m]
