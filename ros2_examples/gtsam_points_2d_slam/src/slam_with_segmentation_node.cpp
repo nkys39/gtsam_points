@@ -6,7 +6,7 @@
  * out dynamic objects. Only static environment points are used for SLAM.
  *
  * Features:
- * - Region Growing segmentation for each scan
+ * - Region Growing segmentation for each scan (using region_growing_2d API)
  * - Dynamic object detection via scan-to-map consistency check
  * - Static-only SLAM for robust mapping in dynamic environments
  * - Semantic labeling of point cloud segments
@@ -33,12 +33,14 @@
 #include <gtsam_points/types/point_cloud_2d_cpu.hpp>
 #include <gtsam_points/factors/integrated_gicp_factor_2d.hpp>
 #include <gtsam_points/factors/integrated_vgicp_factor_2d.hpp>
+#include <gtsam_points/d2/features/normal_estimation_2d.hpp>
 #include <gtsam_points/d2/segmentation/region_growing_2d.hpp>
-#include <gtsam_points/d2/matching/gicp_2d.hpp>
+#include <gtsam_points/d2/ann/kdtree2d_tbb.hpp>
 
 #include <memory>
 #include <vector>
 #include <cmath>
+#include <unordered_set>
 
 using namespace gtsam_points;
 
@@ -57,14 +59,13 @@ public:
     this->declare_parameter("voxel_resolution", 0.1);
 
     // Segmentation parameters
-    this->declare_parameter("region_growing_radius", 0.2);
-    this->declare_parameter("region_growing_min_points", 10);
-    this->declare_parameter("region_growing_smoothness", 0.5);
+    this->declare_parameter("region_growing_distance_threshold", 0.2);
+    this->declare_parameter("region_growing_angle_threshold", 0.5);
     this->declare_parameter("min_segment_size", 15);
     this->declare_parameter("max_segment_size", 1000);
+    this->declare_parameter("normal_estimation_k", 10);
 
     // Dynamic object detection parameters
-    this->declare_parameter("dynamic_detection_threshold", 0.3);
     this->declare_parameter("consistency_check_distance", 0.5);
     this->declare_parameter("min_static_ratio", 0.3);
 
@@ -78,13 +79,12 @@ public:
     use_vgicp_ = this->get_parameter("use_vgicp").as_bool();
     voxel_resolution_ = this->get_parameter("voxel_resolution").as_double();
 
-    region_growing_radius_ = this->get_parameter("region_growing_radius").as_double();
-    region_growing_min_points_ = this->get_parameter("region_growing_min_points").as_int();
-    region_growing_smoothness_ = this->get_parameter("region_growing_smoothness").as_double();
+    region_growing_distance_threshold_ = this->get_parameter("region_growing_distance_threshold").as_double();
+    region_growing_angle_threshold_ = this->get_parameter("region_growing_angle_threshold").as_double();
     min_segment_size_ = this->get_parameter("min_segment_size").as_int();
     max_segment_size_ = this->get_parameter("max_segment_size").as_int();
+    normal_estimation_k_ = this->get_parameter("normal_estimation_k").as_int();
 
-    dynamic_detection_threshold_ = this->get_parameter("dynamic_detection_threshold").as_double();
     consistency_check_distance_ = this->get_parameter("consistency_check_distance").as_double();
     min_static_ratio_ = this->get_parameter("min_static_ratio").as_double();
 
@@ -107,9 +107,9 @@ public:
     segments_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("segments", 10);
 
     RCLCPP_INFO(this->get_logger(), "SLAM with Segmentation node initialized");
-    RCLCPP_INFO(this->get_logger(), "Region Growing radius: %.2f m", region_growing_radius_);
+    RCLCPP_INFO(this->get_logger(), "Region Growing distance: %.2f m, angle: %.2f rad",
+                region_growing_distance_threshold_, region_growing_angle_threshold_);
     RCLCPP_INFO(this->get_logger(), "Min segment size: %d points", min_segment_size_);
-    RCLCPP_INFO(this->get_logger(), "Dynamic detection threshold: %.2f m", dynamic_detection_threshold_);
   }
 
 private:
@@ -140,30 +140,60 @@ private:
 
   /**
    * @brief Segment point cloud using Region Growing
+   *
+   * Uses the gtsam_points region_growing_2d API which requires:
+   * 1. Normal estimation first
+   * 2. KD-tree for neighbor search
+   * 3. Multiple seed points and region growing loops
    */
-  std::vector<std::vector<int>> segmentPointCloud(
+  std::vector<std::vector<size_t>> segmentPointCloud(
     const std::shared_ptr<PointCloud2DCPU>& cloud) {
 
-    RegionGrowing2DParams params;
-    params.search_radius = region_growing_radius_;
-    params.min_cluster_size = region_growing_min_points_;
-    params.smoothness_threshold = region_growing_smoothness_;
+    // Step 1: Estimate normals
+    estimate_normals_2d(*cloud, normal_estimation_k_);
 
-    RegionGrowing2D segmenter(params);
+    // Step 2: Build KD-tree for neighbor search
+    auto kdtree = std::make_shared<KdTree2dTBB>(cloud);
 
-    // Perform segmentation
-    std::vector<std::vector<int>> segments = segmenter.segment(cloud);
+    // Step 3: Region growing parameters
+    RegionGrowingParams2D params;
+    params.distance_threshold = region_growing_distance_threshold_;
+    params.angle_threshold = region_growing_angle_threshold_;
+    params.max_cluster_size = max_segment_size_;
 
-    // Filter segments by size
-    std::vector<std::vector<int>> filtered_segments;
-    for (const auto& segment : segments) {
-      if (static_cast<int>(segment.size()) >= min_segment_size_ &&
-          static_cast<int>(segment.size()) <= max_segment_size_) {
-        filtered_segments.push_back(segment);
+    // Step 4: Perform region growing for multiple segments
+    std::vector<std::vector<size_t>> segments;
+    std::vector<bool> assigned(cloud->size(), false);
+
+    // Try each unassigned point as a seed
+    for (size_t i = 0; i < cloud->size(); ++i) {
+      if (assigned[i]) {
+        continue;
+      }
+
+      // Use this point as seed
+      Eigen::Vector3d seed_point(cloud->points[i].x(), cloud->points[i].y(), 1.0);
+
+      // Initialize region growing from this seed
+      auto context = region_growing_init_2d(*cloud, *kdtree, seed_point, params);
+
+      // Grow the region
+      while (!region_growing_update_2d(context, *cloud, *kdtree, params)) {
+        // Continue growing
+      }
+
+      // Check segment size
+      if (static_cast<int>(context.cluster_indices.size()) >= min_segment_size_ &&
+          static_cast<int>(context.cluster_indices.size()) <= max_segment_size_) {
+        // Mark points as assigned
+        for (size_t idx : context.cluster_indices) {
+          assigned[idx] = true;
+        }
+        segments.push_back(context.cluster_indices);
       }
     }
 
-    return filtered_segments;
+    return segments;
   }
 
   /**
@@ -171,7 +201,7 @@ private:
    */
   bool isSegmentStatic(
     const std::shared_ptr<PointCloud2DCPU>& cloud,
-    const std::vector<int>& segment,
+    const std::vector<size_t>& segment,
     const gtsam::Pose2& current_pose) {
 
     // If no map yet, consider all segments as static
@@ -181,7 +211,7 @@ private:
 
     // Create a point cloud from the segment
     auto segment_cloud = std::make_shared<PointCloud2DCPU>();
-    for (int idx : segment) {
+    for (size_t idx : segment) {
       segment_cloud->add_point(cloud->points[idx]);
     }
 
@@ -199,20 +229,19 @@ private:
     // Check consistency with the latest keyframe
     const auto& reference_cloud = keyframes_.back();
 
+    // Build KD-tree for reference cloud
+    auto reference_tree = std::make_shared<KdTree2dTBB>(reference_cloud);
+
     // Simple consistency check: for each point in segment, find nearest in reference
     int consistent_count = 0;
     for (size_t i = 0; i < segment_in_map->size(); ++i) {
-      double min_dist = std::numeric_limits<double>::max();
+      size_t nearest_idx;
+      double sq_dist;
 
-      for (size_t j = 0; j < reference_cloud->size(); ++j) {
-        double dist = (segment_in_map->points[i] - reference_cloud->points[j]).norm();
-        if (dist < min_dist) {
-          min_dist = dist;
+      if (reference_tree->knn_search(segment_in_map->points[i].data(), 1, &nearest_idx, &sq_dist)) {
+        if (sq_dist < consistency_check_distance_ * consistency_check_distance_) {
+          consistent_count++;
         }
-      }
-
-      if (min_dist < consistency_check_distance_) {
-        consistent_count++;
       }
     }
 
@@ -227,7 +256,7 @@ private:
    */
   std::shared_ptr<PointCloud2DCPU> filterStaticPoints(
     const std::shared_ptr<PointCloud2DCPU>& cloud,
-    const std::vector<std::vector<int>>& segments,
+    const std::vector<std::vector<size_t>>& segments,
     const gtsam::Pose2& current_pose,
     std::vector<bool>& segment_labels) {
 
@@ -241,7 +270,7 @@ private:
 
       if (is_static) {
         // Add all points from static segment
-        for (int idx : segment) {
+        for (size_t idx : segment) {
           static_cloud->add_point(cloud->points[idx]);
         }
       }
@@ -255,7 +284,7 @@ private:
    */
   void publishSegmentVisualization(
     const std::shared_ptr<PointCloud2DCPU>& cloud,
-    const std::vector<std::vector<int>>& segments,
+    const std::vector<std::vector<size_t>>& segments,
     const std::vector<bool>& segment_labels,
     const gtsam::Pose2& pose,
     const std_msgs::msg::Header& header) {
@@ -293,7 +322,7 @@ private:
       }
 
       // Add points
-      for (int idx : segments[seg_idx]) {
+      for (size_t idx : segments[seg_idx]) {
         geometry_msgs::msg::Point p;
         Eigen::Vector2d p_map = T_map_sensor * cloud->points[idx];
         p.x = p_map.x();
@@ -528,13 +557,12 @@ private:
   bool use_vgicp_;
   double voxel_resolution_;
 
-  double region_growing_radius_;
-  int region_growing_min_points_;
-  double region_growing_smoothness_;
+  double region_growing_distance_threshold_;
+  double region_growing_angle_threshold_;
   int min_segment_size_;
   int max_segment_size_;
+  int normal_estimation_k_;
 
-  double dynamic_detection_threshold_;
   double consistency_check_distance_;
   double min_static_ratio_;
 

@@ -14,15 +14,35 @@ slam_with_segmentation:
     use_vgicp: true              # Use VGICP (true) or GICP (false)
     voxel_resolution: 0.1        # Voxel grid resolution [m]
 
-    # Region Growing Segmentation parameters
-    region_growing_radius: 0.2         # Search radius for neighbor finding [m]
-    region_growing_min_points: 10      # Minimum points to form a seed region
-    region_growing_smoothness: 0.5     # Smoothness threshold (0-1, lower = stricter)
-    min_segment_size: 15               # Minimum points in valid segment
-    max_segment_size: 1000             # Maximum points in valid segment
+    # Region Growing Segmentation parameters (using gtsam_points region_growing_2d API)
+    region_growing_distance_threshold: 0.2   # Neighbor search distance [m]
+    region_growing_angle_threshold: 0.5      # Normal angle threshold [rad] (~28.6 degrees)
+    min_segment_size: 15                      # Minimum points in valid segment
+    max_segment_size: 1000                    # Maximum points in valid segment
+    normal_estimation_k: 10                   # K-nearest neighbors for normal estimation
 
     # Dynamic object detection parameters
-    dynamic_detection_threshold: 0.3   # Distance threshold for dynamic detection [m]
     consistency_check_distance: 0.5    # Max distance for point-to-map consistency [m]
     min_static_ratio: 0.3              # Minimum ratio of consistent points (0-1)
                                        # Segments with >= this ratio are considered static
+
+# Algorithm explanation:
+#
+# Segmentation process:
+# 1. Estimate normals using estimate_normals_2d (k-nearest neighbors)
+# 2. Build KD-tree for neighbor search
+# 3. For each unassigned point:
+#    a. Use as seed for region growing
+#    b. Initialize with region_growing_init_2d
+#    c. Grow region with region_growing_update_2d
+#    d. Check size constraints and mark as segment
+# 4. Classify segments as static/dynamic:
+#    a. Transform segment to map frame
+#    b. Find nearest neighbors in reference map
+#    c. Compute consistency ratio
+#    d. Label as static if ratio > min_static_ratio
+# 5. Use only static points for SLAM
+#
+# Visualization:
+# - Green markers: Static segments (used for SLAM)
+# - Red markers: Dynamic segments (filtered out)

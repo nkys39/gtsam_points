@@ -10,12 +10,29 @@ slam_with_gnc:
     keyframe_distance: 0.5      # Distance threshold [m]
     keyframe_angle: 0.3          # Angle threshold [rad]
 
-    # Scan matching
-    max_correspondence_distance: 1.0
+    # Correspondence distance
+    max_correspondence_distance: 1.0  # Maximum correspondence distance [m]
 
     # GNC (Graduated Non-Convexity) parameters
-    gnc_mu_init: 1.0            # Initial value of mu (control parameter)
-    gnc_mu_step: 1.4            # Mu update factor (mu *= mu_step each iteration)
-    gnc_max_iterations: 100     # Maximum GNC iterations
-    gnc_cost_threshold: 1.0e-5  # Convergence threshold for cost change
-    gnc_inlier_threshold: 0.1   # Distance threshold for inliers [m]
+    # These parameters control the weighted ICP with Geman-McClure robust cost
+    gnc_mu_init: 1.0                    # Initial μ value (lower = more robust)
+    gnc_mu_step: 1.4                    # μ multiplication factor per iteration
+    gnc_max_iterations: 50              # Maximum GNC iterations
+    gnc_convergence_threshold: 1.0e-6   # Convergence threshold for cost change
+    gnc_inlier_threshold: 0.1           # Inlier distance threshold [m]
+
+# Algorithm explanation:
+#
+# GNC (Graduated Non-Convexity) uses the Geman-McClure robust cost function:
+#   ρ(r) = r² / (μ + r²)
+#   w(r) = μ / (μ + r²)²
+#
+# Process:
+# 1. Start with small μ (robust to outliers)
+# 2. Find correspondences and compute weights using Geman-McClure
+# 3. Perform weighted alignment with align_points_se2
+# 4. Increase μ by gnc_mu_step
+# 5. Repeat until convergence
+#
+# As μ increases, the cost function becomes less robust (approaches L2)
+# This "graduated" approach starts robust and gradually becomes precise
