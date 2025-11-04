@@ -303,6 +303,32 @@ target_link_libraries(offline_map_optimizer
 rosidl_target_interfaces(offline_map_optimizer
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
+# Add RANSAC SLAM node executable
+add_executable(slam_with_ransac_node
+  src/slam_with_ransac_node.cpp
+)
+
+target_include_directories(slam_with_ransac_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${EIGEN3_INCLUDE_DIR}
+)
+
+ament_target_dependencies(slam_with_ransac_node
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(slam_with_ransac_node
+  gtsam_points::gtsam_points
+  gtsam
+)
+
 # Install targets
 install(TARGETS
   slam_node
@@ -315,6 +341,7 @@ install(TARGETS
   slam_with_map_save_node
   slam_with_ct_gicp_node
   offline_map_optimizer
+  slam_with_ransac_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

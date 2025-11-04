@@ -1,0 +1,25 @@
+slam_with_ransac:
+  ros__parameters:
+    # Frame IDs
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    scan_topic: "scan"
+
+    # Keyframe selection
+    keyframe_distance: 0.5      # Distance threshold [m]
+    keyframe_angle: 0.3          # Angle threshold [rad]
+
+    # Scan matching
+    max_correspondence_distance: 1.0
+
+    # RANSAC parameters
+    ransac_iterations: 100       # Number of RANSAC iterations
+    ransac_inlier_threshold: 0.1 # Inlier distance threshold [m]
+    ransac_min_inliers: 50       # Minimum number of inliers for valid match
+    ransac_confidence: 0.99      # Confidence level for RANSAC
+
+    # Relocalization (kidnapped robot problem)
+    enable_relocalization: true
+    relocalization_distance: 3.0         # Max distance for relocalization [m]
+    relocalization_score_threshold: 0.7  # Minimum inlier ratio for relocalization
